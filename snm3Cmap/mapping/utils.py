@@ -88,7 +88,10 @@ def illegal_overlap(seg_keys):
 
 def contact_filter(algn1, 
                    algn2, 
-                   pair_index):
+                   pair_index,
+                   R1_cs_keys,
+                   R2_cs_keys
+                  ):
     if not algn1["is_mapped"] or not algn1["is_unique"]:
         return False
     if not algn2["is_mapped"] or not algn2["is_unique"]:
@@ -96,12 +99,21 @@ def contact_filter(algn1,
     contact_type = pair_index[1]
     
     if contact_type == "R1": # Pairtools reports 5' fragment before 3' fragment
-        if algn1["is_cut"] != True:
+        idx5 = algn1["idx"]
+        idx3 = algn2["idx"]
+        cs_key = (idx5, idx3)
+        if cs_key not in R1_cs_keys:
+            return False
+        if not R1_cs_keys[cs_key]:
             return False
     elif contact_type == "R2": # Pairtools reports 3' fragment before 5' fragment
-        if algn2["is_cut"] != True:
+        idx5 = algn2["idx"]
+        idx3 = algn1["idx"]
+        cs_key = (idx5, idx3)
+        if cs_key not in R2_cs_keys:
             return False
-        
+        if not R2_cs_keys[cs_key]:
+            return False
     return True
 
 def get_methylation_tags(pairs, mate, is_forward):
@@ -218,6 +230,9 @@ def create_trimmed_mate(read, original_span, adjusted_span, pairs, mate, header)
         end_index = index_5
         pos = pos_3
 
+    if start_index >= end_index:
+        return None, None
+    
     new_pairs = pairs[start_index:end_index]
     if not read.is_secondary:
         left_pairs = softclip_pairs(pairs[:start_index])
@@ -443,16 +458,17 @@ def adjust_split(pairs5, seg5, read5,
 
 def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
 
+    cut_site_keys = {}
+
     if len(seg_keys) == 1:
         existing_data = ordered_reads[0]
         existing_data["adjusted_span"] = seg_keys[0]
-        existing_data["is_cut"] = False
         existing_data["trimmed_read"] = existing_data["read"]
         existing_data["new_pairs"] = existing_data["pairs"]
+        return ordered_reads, cut_site_keys
 
     # Chimeric read
     adjusted_seg_keys = seg_keys.copy()
-    cut_site_keys = [False] * len(seg_keys)
     
     for i in range(len(adjusted_seg_keys)-1):
         seg5 = adjusted_seg_keys[i]
@@ -469,25 +485,30 @@ def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
                                             pairs3, seg3, read3,
                                             original_sequence, mate)
 
-        #print(aseg5, aseg3)
-
         adjusted_seg_keys[i] = aseg5
         adjusted_seg_keys[i+1] = aseg3
-        cut_site_keys[i] = is_cut
+        cut_site_keys[(i, i+1)] = is_cut
 
-    for i in ordered_reads:
-        existing_data = ordered_reads[i]
-        existing_data["adjusted_span"] = adjusted_seg_keys[i]
-        existing_data["is_cut"] = cut_site_keys[i]
-        #for pair in existing_data["pairs"]:
-        #    print(pair)
-        trimmed_read, new_pairs = create_trimmed_mate(existing_data["read"], 
-                                                      existing_data["span"], 
-                                                      existing_data["adjusted_span"], 
-                                                      existing_data["pairs"], 
-                                                      mate, header)
-        existing_data["trimmed_read"] = trimmed_read
-        existing_data["new_pairs"] = new_pairs
+    all_keys = list(ordered_reads.keys())
+    for key in all_keys:
+        ordered_reads[key]["adjusted_span"] = adjusted_seg_keys[key]
+        
+        trimmed_read, new_pairs = create_trimmed_mate(
+            ordered_reads[key]["read"], 
+            ordered_reads[key]["span"], 
+            ordered_reads[key]["adjusted_span"], 
+            ordered_reads[key]["pairs"], 
+            mate, 
+            header
+        )
+
+        if trimmed_read == None: # Read is eliminated/erroneous by trimming
+            del ordered_reads[key] # Delete read from dictionary 
+        else:
+            ordered_reads[key]["trimmed_read"] = trimmed_read
+            ordered_reads[key]["new_pairs"] = new_pairs
+
+    return ordered_reads, cut_site_keys
     
 
 def get_5_cut_point(pairs, original_point, is_forward):

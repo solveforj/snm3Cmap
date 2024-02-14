@@ -14,7 +14,7 @@ class ContactGenerator:
     def process_mate(self, all_alignments, primary_alignment, mate, read_group_name):
 
         if len(all_alignments) == 0:
-            return OrderedDict(), None, 0, 0, 0
+            return OrderedDict(), {}, None, 0, 0, 0
     
         read_parts = {}
         
@@ -36,7 +36,7 @@ class ContactGenerator:
 
 
         if len(seg_keys) == 0:
-            return OrderedDict(), None, 0, 0, 0
+            return OrderedDict(), {}, None, 0, 0, 0
 
         total_alignments = len(seg_keys)
         has_chimera = read_parts[seg_keys[0]].has_tag("SA")
@@ -44,9 +44,10 @@ class ContactGenerator:
         chimeric_alignments = 1 if has_chimera else 0
         
         # Throw out these reads
+
         if illegal_overlap(seg_keys):
             self.illegal_overlap_count += 1
-            return OrderedDict(), None, total_alignments, whole_alignments, chimeric_alignments
+            return OrderedDict(), {}, None, total_alignments, whole_alignments, chimeric_alignments
 
         ordered_reads = OrderedDict()
 
@@ -58,11 +59,10 @@ class ContactGenerator:
                                 "pairs" : None,
                                 "mate" : mate,
                                 "adjusted_span" : span,
-                                "is_cut" : False,
                                 "trimmed_read" : read,
                                 "new_pairs" : None}
+            cut_site_keys = {}
         else:
-            
             for i in range(len(seg_keys)):
                 read = read_parts[seg_keys[i]]
                 span = seg_keys[i]
@@ -72,9 +72,9 @@ class ContactGenerator:
                                     "mate" : mate
                                    }
                 
-            trim_mate(seg_keys, original_sequence, ordered_reads, mate, self.header)
-
-        return ordered_reads, original_sequence, total_alignments, whole_alignments, chimeric_alignments
+            ordered_reads, cut_site_keys = trim_mate(seg_keys, original_sequence, ordered_reads, mate, self.header)
+        
+        return ordered_reads, cut_site_keys, original_sequence, total_alignments, whole_alignments, chimeric_alignments
     
     def process_read_group(self, read_group, read_group_name, bam_out, contacts_out):
         r1 = []
@@ -95,8 +95,8 @@ class ContactGenerator:
                 r2.append(read)
 
         # Order reads from 5' to 3'
-        R1, R1_oseq, R1_tot_algn, R1_w_algn, R1_c_algn = self.process_mate(r1, r1_primary, "1", read_group_name)
-        R2, R2_oseq, R2_tot_algn, R2_w_algn, R2_c_algn = self.process_mate(r2, r2_primary, "2", read_group_name)
+        R1, R1_cs_keys, R1_oseq, R1_tot_algn, R1_w_algn, R1_c_algn = self.process_mate(r1, r1_primary, "1", read_group_name)
+        R2, R2_cs_keys, R2_oseq, R2_tot_algn, R2_w_algn, R2_c_algn = self.process_mate(r2, r2_primary, "2", read_group_name)
 
         self.r1_total_alignments += R1_tot_algn
         self.r1_whole_alignments += R1_w_algn
@@ -105,11 +105,11 @@ class ContactGenerator:
         self.r2_total_alignments += R2_tot_algn
         self.r2_whole_alignments += R2_w_algn
         self.r2_chimeric_alignments += R2_c_algn
-
+        
         contacts, rule = contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap=20)
 
         for (hic_algn1, hic_algn2, pair_index) in contacts:
-            if contact_filter(hic_algn1, hic_algn2, pair_index):
+            if contact_filter(hic_algn1, hic_algn2, pair_index, R1_cs_keys, R2_cs_keys):
                 write_pairsam(hic_algn1, hic_algn2, read_group_name, pair_index, rule, contacts_out)
 
         for i in R1:
@@ -125,8 +125,7 @@ class ContactGenerator:
                 bam_out.write(read)
             else:
                 self.r2_duplicate_alignments += 1
-        
-            
+   
     def process_bam(self):
 
         self.illegal_overlap_count = 0

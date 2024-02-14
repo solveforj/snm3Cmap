@@ -30,6 +30,8 @@ def prepare_mapping(plate_info,
     with open(plate_info) as f:
         for line in f:
             plate = line.strip()
+            if len(plate) == 0:
+                continue
             plate_run_directory = os.path.join(demultiplex_directory, plate)
 
             with open(f"{plate_run_directory}/mapping_scripts.txt", 'w') as scripts:

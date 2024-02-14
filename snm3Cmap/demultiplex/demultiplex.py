@@ -17,6 +17,8 @@ def prepare_demultiplex(fastq_directory,
     with open(plate_info) as f:
         for line in f:
             plate = line.strip()
+            if len(plate) == 0:
+                continue
             plate_run_directory = os.path.join(output_directory, plate)
             Path(plate_run_directory).mkdir(parents=True, exist_ok=True)
 
@@ -40,4 +42,5 @@ def prepare_demultiplex(fastq_directory,
                 cmd = f"snakemake -d {plate_run_directory} "
                 cmd += f"--snakefile {plate_run_directory}/demultiplex.smk "
                 cmd += f" -j {jobs} "
+                cmd += f" --nolock --rerun-incomplete "
                 f.write(cmd + '\n')

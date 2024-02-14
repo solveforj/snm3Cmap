@@ -51,7 +51,7 @@ def cigar_dict(cigartuples, cigarstring):
 
 def parse_read(read, 
                span,
-               is_cut,
+               idx,
                report_3_alignment_end=True,
                min_mapq=30):
 
@@ -107,12 +107,12 @@ def parse_read(read,
         "is_mapped": is_mapped,
         "is_unique": is_unique,
         "is_linear": is_linear,
-        "is_cut" : is_cut,
         "dist_to_5": dist_to_5,
         "dist_to_3": dist_to_3,
         "type": ("N" if not is_mapped else ("M" if not is_unique else "U")),
         "span":span,
         "mate":mate,
+        "idx": idx,
         "reference_start": read.reference_start,
         "reference_end": read.reference_end
     }
@@ -662,11 +662,11 @@ def empty_alignment():
         "is_unique": False,
         "is_mapped": False,
         "is_linear": True,
-        "is_cut": False,
         "cigar": "*",
         "type": "N",
         "span":"NA",
         "mate": "NA",
+        "idx" : "NA",
         "reference_start": "NA",
         "reference_end": "NA"
     }
@@ -811,16 +811,14 @@ def contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap
         read_data = R1[i]
         read = read_data["trimmed_read"]
         span = read_data["adjusted_span"]
-        is_cut = read_data["is_cut"]
-        R1_parsed.append(parse_read(read, span, is_cut, min_mapq))
+        R1_parsed.append(parse_read(read, span, i, min_mapq))
 
     R2_parsed = []
     for i in R2:
         read_data = R2[i]
         read = read_data["trimmed_read"]
         span = read_data["adjusted_span"]
-        is_cut = read_data["is_cut"]
-        R2_parsed.append(parse_read(read, span, is_cut, min_mapq))
+        R2_parsed.append(parse_read(read, span, i, min_mapq))
 
     if len(R1_parsed) > 0:
         R1_parsed = sorted(R1_parsed, key=lambda algn: algn["dist_to_5"])
