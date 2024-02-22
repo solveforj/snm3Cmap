@@ -10,8 +10,6 @@ import os
 
 log = logging.getLogger()
 
-#__version__ = 1.0
-
 DESCRIPTION = """
 Pipeline for mapping snm3Cseq data
 
@@ -56,47 +54,30 @@ def prepare_demultiplex_register_subparser(subparser):
     parser = subparser.add_parser('prepare-demultiplex',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                   help="Setup demultiplexing")
+    
     parser_req = parser.add_argument_group("required arguments")
-    parser_req.add_argument('--fastq-directory', type=str, default=None, required=True,
-                            help='Directory where raw fastq files are stored ending with /')
+    
     parser_req.add_argument('--plate-info', type=str, default=None, required=True,
-                            help='Path to plate ids in text file')
+                            help="""Path to tab-separated file with one line for each plate. 
+                                    The first column has the path to the raw fastq files for a plate.
+                                    The second column has the identifier for a plate.
+                                """)
     parser_req.add_argument('--output-directory', type=str, default=None, required=True,
                         help='Directory for output fastq files')
     parser_req.add_argument('--barcodes', type=str, default=None, required=True,
                         help='Path to barcodes fasta')
 
-    parser_req = parser.add_argument_group("optional arguments")
-    parser_req.add_argument('--jobs', type=int, default=2, required=False,
-                        help='Number of concurrent jobs to run (for Snakemake)')
-
-def demultiplex_register_subparser(subparser):
-    parser = subparser.add_parser('demultiplex',
-                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                                  help="Demultiplex a well plate fastq")
-
-    # Required arguments
-    parser_req = parser.add_argument_group("required arguments")
+    parser_opt = parser.add_argument_group("optional arguments")
     
-    parser_req.add_argument('--plate', type=str, default=None, required=True,
-                            help='Plate identifier')
+    parser_opt.add_argument('--jobs', type=int, default=2,
+                        help='If set, Snakemake is run with this many concurrent processes')
     
-    parser_req.add_argument('--R1', type=str, default=None, required=True,
-                            help='Path to R1 fastq file to be demultiplexed')
-
-    parser_req.add_argument('--R2', type=str, default=None, required=True,
-                            help='Path to R2 fastq file to be demultiplexed')
+    parser_opt.add_argument('--nolock', action="store_true", 
+                            help='If set, Snakemake is run with --nolock (working directory will not be locked)')
     
-    parser_req.add_argument('--barcodes', type=str, default=None, required=True,
-                            help='Path to barcodes fasta')
-    
-    parser_req.add_argument('--out-dir', type=str, default=None, required=True,
-                            help='Directory where demultiplexed fastq will be written')
-
-    parser_req = parser.add_argument_group("optional arguments")
-    parser_req.add_argument('--threads', type=int, default=8, required=False,
-                            help='Number of threads to be used for writing fastq files')
-
+    parser_opt.add_argument('--rerun-incomplete', action="store_true",
+                            help="""If set, Snakemake is run with --rerun-incomplete 
+                                    (re-run all jobs the output of which is recognized as incomplete)""")
 
 def prepare_mapping_register_subparser(subparser):
     parser = subparser.add_parser('prepare-mapping',
@@ -118,9 +99,17 @@ def prepare_mapping_register_subparser(subparser):
     parser_req.add_argument('--reference-genome', type=str, default=None, required=True,
                             help='Path to indexed reference genome')
 
-    parser_req = parser.add_argument_group("optional arguments")
-    parser_req.add_argument('--jobs', type=int, default=2, required=False,
-                        help='Number of concurrent jobs to run (for Snakemake)')
+    parser_opt = parser.add_argument_group("optional arguments")
+
+    parser_opt.add_argument('--jobs', type=int, default=2,
+                        help='If set, Snakemake is run with this many concurrent processes')
+    
+    parser_opt.add_argument('--nolock', action="store_true",
+                            help='If set, Snakemake is run with --nolock (working directory will not be locked)')
+    
+    parser_opt.add_argument('--rerun-incomplete', action="store_true",
+                            help="""If set, Snakemake is run with --rerun-incomplete 
+                                    (re-run all jobs the output of which is recognized as incomplete)""")
 
 def contamination_filter_register_subparser(subparser):
     parser = subparser.add_parser('contamination-filter',
@@ -142,7 +131,7 @@ def contamination_filter_register_subparser(subparser):
 def call_contacts_register_subparser(subparser):
     parser = subparser.add_parser('call-contacts',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                                  help="Call contacts from BAM file and trim chimeric alignments to remove same-mate overlaps")
+                                  help="Call contacts from BAM file and trim chimeric alignments to remove within-mate overlaps")
 
     # Required arguments
     parser_req = parser.add_argument_group("required arguments")
@@ -152,6 +141,22 @@ def call_contacts_register_subparser(subparser):
                             
     parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
                             help='Path including name prefix for output files')
+
+    parser_opt = parser.add_argument_group("optional arguments")
+    
+    parser_opt.add_argument('--min-mapq', type=int, default=30,
+                        help='Minimum MAPQ to consider alignment (Pairtools parameter)')
+
+    parser_opt.add_argument('--max-molecule-size', type=int, default=750,
+                        help="""The maximal size of a Hi-C molecule; used to rescue single ligations 
+                                (from molecules with three alignments) and to rescue complex ligations.
+                                Used for walks-policy mask, not walks-policy all (Pairtools parameter)""")
+    
+    parser_opt.add_argument('--max-inter-align-gap', type=int, default=20,
+                      help="""Read segments that are not covered by any alignment and longer than the 
+                              specified value are treated as “null” alignments. These null alignments 
+                              convert otherwise linear alignments into walks, and affect how they get reported 
+                              as a Hi-C pair (Pairtools parameter)""")
 
 
 def mask_overlaps_register_subparser(subparser):
@@ -185,25 +190,24 @@ def bam_to_allc_register_subparser(subparser):
     parser_req.add_argument('--output-path', type=str, default=None, required=True,
                             help='Path to output ALLC')
 
-    # Optional arguments
-    parser_req = parser.add_argument_group("optional arguments")
+    parser_opt = parser.add_argument_group("optional arguments")
 
-    parser_req.add_argument('--num-upstr-bases', type=int, default=0, required=False,
+    parser_opt.add_argument('--num-upstr-bases', type=int, default=0,
                             help='Number of upstream bases for context')
 
-    parser_req.add_argument('--num-downstr-bases', type=int, default=2, required=False,
+    parser_opt.add_argument('--num-downstr-bases', type=int, default=2,
                             help='Number of downstream bases for context')
     
-    parser_req.add_argument('--min-mapq', type=int, default=30, required=False,
+    parser_opt.add_argument('--min-mapq', type=int, default=30,
                             help='Minimum MAPQ score for including aligned reads')
 
-    parser_req.add_argument('--min-base-quality', type=int, default=20, required=False,
+    parser_opt.add_argument('--min-base-quality', type=int, default=20,
                             help='Minimum base quality for including aligned nucleotides')
     
-    parser_req.add_argument('--compress-level', type=int, default=5, required=False,
+    parser_opt.add_argument('--compress-level', type=int, default=5,
                             help='Compression level')
     
-    parser_req.add_argument('--save-count-df', action="store_true", required=False,
+    parser_opt.add_argument('--save-count-df', action="store_true",
                             help='If set, save context count summary file')
 
 def aggregate_qc_stats_register_subparser(subparser):

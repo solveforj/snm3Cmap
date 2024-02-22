@@ -42,6 +42,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import pandas as pd
 import pysam
+import numpy as np
 
 # logger
 log = logging.getLogger(__name__)

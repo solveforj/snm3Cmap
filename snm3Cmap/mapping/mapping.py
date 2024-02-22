@@ -7,10 +7,14 @@ def prepare_mapping(plate_info,
                     demultiplex_directory, 
                     barcodes,
                     reference_genome,
-                    jobs=2
+                    jobs=2,
+                    nolock=False,
+                    rerun_incomplete=False
                    ):
+
+    smk_path = 'mapping.Snakefile'
     
-    with Path(__file__).with_name('mapping.Snakefile').open('r') as f:
+    with Path(__file__).with_name(smk_path).open('r') as f:
         snake_template = f.read()
     
     cell_ids = []
@@ -26,12 +30,18 @@ def prepare_mapping(plate_info,
         "biscuit_threads" : f'{biscuit_threads}',
         "reference_path" : f'"{reference_genome}"'
     }
+
+    nolock = "--nolock" if nolock else ""
+    rerun_incomplete = "--rerun-incomplete" if rerun_incomplete else ""
     
     with open(plate_info) as f:
         for line in f:
-            plate = line.strip()
-            if len(plate) == 0:
+            line = line.strip()
+            if len(line) == 0:
                 continue
+            line = line.split("\t")
+            fastq_directory, plate = line[0], line[1]
+            
             plate_run_directory = os.path.join(demultiplex_directory, plate)
 
             with open(f"{plate_run_directory}/mapping_scripts.txt", 'w') as scripts:
@@ -47,7 +57,7 @@ def prepare_mapping(plate_info,
                     with open(snakemake_cmd, 'w') as f:
                         cmd = f"snakemake -d {cell_run_directory} "
                         cmd += f"--snakefile {plate_run_directory}/mapping.smk -c {jobs} "
-                        cmd += f"--config cell={cell} plate={plate} --nolock --rerun-incomplete "
+                        cmd += f"--config cell={cell} plate={plate} {nolock} {rerun_incomplete} "
                         f.write(cmd + '\n')
 
             params_write = "\n".join([f"{k} = {v}" for k, v in params.items()])

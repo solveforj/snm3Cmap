@@ -2,23 +2,29 @@ from pathlib import Path
 import os
 import yaml
 
-def prepare_demultiplex(fastq_directory, 
-                        plate_info,
+def prepare_demultiplex(plate_info,
                         output_directory,
                         barcodes,
-                        jobs=2
+                        jobs=2,
+                        nolock=False,
+                        rerun_incomplete=False
                        ):
 
     Path(output_directory).mkdir(parents=True, exist_ok=True)
     
     with Path(__file__).with_name('demultiplex.Snakefile').open('r') as f:
         snake_template = f.read()
-   
+        
+    nolock = "--nolock" if nolock else ""
+    rerun_incomplete = "--rerun-incomplete" if rerun_incomplete else ""
+
     with open(plate_info) as f:
         for line in f:
-            plate = line.strip()
-            if len(plate) == 0:
+            line = line.strip()
+            if len(line) == 0:
                 continue
+            line = line.split("\t")
+            fastq_directory, plate = line[0], line[1]
             plate_run_directory = os.path.join(output_directory, plate)
             Path(plate_run_directory).mkdir(parents=True, exist_ok=True)
 
@@ -41,6 +47,6 @@ def prepare_demultiplex(fastq_directory,
             with open(f"{plate_run_directory}/demultiplex_cmd.txt", 'w') as f:
                 cmd = f"snakemake -d {plate_run_directory} "
                 cmd += f"--snakefile {plate_run_directory}/demultiplex.smk "
-                cmd += f" -j {jobs} "
-                cmd += f" --nolock --rerun-incomplete "
+                cmd += f" -c {jobs} "
+                cmd += f" {nolock} {rerun_incomplete} "
                 f.write(cmd + '\n')

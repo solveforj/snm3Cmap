@@ -2,6 +2,8 @@ import re
 import pysam
 import pandas as pd
 import numpy as np
+import subprocess
+import shlex
 
 rng = np.random.default_rng(1)
 
@@ -93,9 +95,9 @@ def contact_filter(algn1,
                    R2_cs_keys
                   ):
     if not algn1["is_mapped"] or not algn1["is_unique"]:
-        return False
+        return "na"
     if not algn2["is_mapped"] or not algn2["is_unique"]:
-        return False
+        return "na"
     contact_type = pair_index[1]
     
     if contact_type == "R1": # Pairtools reports 5' fragment before 3' fragment
@@ -103,18 +105,18 @@ def contact_filter(algn1,
         idx3 = algn2["idx"]
         cs_key = (idx5, idx3)
         if cs_key not in R1_cs_keys:
-            return False
+            return "chimera"
         if not R1_cs_keys[cs_key]:
-            return False
+            return "chimera"
     elif contact_type == "R2": # Pairtools reports 3' fragment before 5' fragment
         idx5 = algn2["idx"]
         idx3 = algn1["idx"]
         cs_key = (idx5, idx3)
         if cs_key not in R2_cs_keys:
-            return False
+            return "chimera"
         if not R2_cs_keys[cs_key]:
-            return False
-    return True
+            return "chimera"
+    return "contact"
 
 def get_methylation_tags(pairs, mate, is_forward):
 
@@ -267,6 +269,12 @@ def create_trimmed_mate(read, original_span, adjusted_span, pairs, mate, header)
         tag = tags[i]
         if tag[0] in new_tags:
             tags[i] = (tag[0], new_tags[tag[0]])
+
+    real_trim_5 = read_5 - original_span[0]
+    real_trim_3 = original_span[1] - read_3 + 1 
+
+    tags.append(("ZU", real_trim_5))
+    tags.append(("ZD", real_trim_3))
     
     new_read = pysam.AlignedSegment(header=pysam.AlignmentHeader().from_dict(header))
     new_read.query_name = read.query_name
@@ -459,13 +467,14 @@ def adjust_split(pairs5, seg5, read5,
 def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
 
     cut_site_keys = {}
+    illegal_post_trim = 0
 
     if len(seg_keys) == 1:
         existing_data = ordered_reads[0]
         existing_data["adjusted_span"] = seg_keys[0]
         existing_data["trimmed_read"] = existing_data["read"]
         existing_data["new_pairs"] = existing_data["pairs"]
-        return ordered_reads, cut_site_keys
+        return ordered_reads, cut_site_keys, illegal_post_trim
 
     # Chimeric read
     adjusted_seg_keys = seg_keys.copy()
@@ -490,6 +499,7 @@ def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
         cut_site_keys[(i, i+1)] = is_cut
 
     all_keys = list(ordered_reads.keys())
+    
     for key in all_keys:
         ordered_reads[key]["adjusted_span"] = adjusted_seg_keys[key]
         
@@ -504,11 +514,12 @@ def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
 
         if trimmed_read == None: # Read is eliminated/erroneous by trimming
             del ordered_reads[key] # Delete read from dictionary 
+            illegal_post_trim += 1
         else:
             ordered_reads[key]["trimmed_read"] = trimmed_read
             ordered_reads[key]["new_pairs"] = new_pairs
 
-    return ordered_reads, cut_site_keys
+    return ordered_reads, cut_site_keys, illegal_post_trim
     
 
 def get_5_cut_point(pairs, original_point, is_forward):
@@ -602,6 +613,73 @@ def build_cigar(read, pairs, start_index, end_index):
 
     return updated_cigartuples
 
+def dedup_contacts(dup_path, dedup_path, save_raw = True):
+    columns = ["read", 
+               "chrom1", "pos1", "chrom2", 
+               "pos2", "strand1", "strand2", 
+               "contact_type", "pair_index", "pair_type"]
+
+    contact_stats = {
+        "total_contacts" : 0,
+        "contacts_dedup_rate" : 0,
+        "intra1kb_contacts" : 0,
+        "intra10kb_contacts" : 0,
+        "inter_contacts" : 0
+    }
+
+    contact_types = {"R1" : 0,
+                 "R2" : 0,
+                 "R1-2" : 0,
+                 "R1-2" : 0,
+                 "R1&2" : 0,
+                 "RU_mask" : 0,
+                 "UU_all" : 0,
+                 "UU_mask" : 0,
+                 "UR_mask" : 0
+                 }
+
+    try:
+        df = pd.read_table(dup_path, header=None)
+        df.columns = columns
+    except ValueError:
+        df = pd.DataFrame(columns=columns)
+        
+    df_dedup = df.drop_duplicates(["chrom1", "pos1", 
+                                   "chrom2", "pos2", 
+                                   "strand1", "strand2"])
+
+    df_intra = df_dedup[df_dedup["chrom1"] == df_dedup["chrom2"]]
+    df_intra_1kb = df_intra[(df_intra["pos2"] - df_intra["pos1"]).abs() >= 1000]
+    df_intra_10kb = df_intra[(df_intra["pos2"] - df_intra["pos1"]).abs() >= 10000]
+
+    df_inter = df_dedup[df_dedup["chrom1"] != df_dedup["chrom2"]]
+
+    if len(df) > 0:
+        contact_stats["contacts_dedup_rate"] = dedup_rate = 1 - (len(df_dedup) / len(df))
+    else:
+        contact_stats["contacts_dedup_rate"] = np.nan
+
+    contact_stats["intra1kb_contacts"] = len(df_intra_1kb)
+    contact_stats["intra10kb_contacts"] = len(df_intra_10kb)
+    contact_stats["inter_contacts"] = len(df_inter)
+    
+    report_contacts = pd.concat([df_intra_1kb, df_inter])
+    contact_types_emp = {**dict(report_contacts["contact_type"].value_counts()), 
+           **dict(report_contacts["pair_type"].value_counts())}
+    for i in contact_types_emp:
+        contact_types[i] += contact_types_emp[i]
+
+    contact_stats["total_contacts"] = len(report_contacts)
+
+    report_contacts.to_csv(dedup_path, header=False, index=False, sep="\t")
+    
+    if not save_raw:
+        subprocess.run(shlex.split(f'rm -f {dup_path}'), check=True)
+
+    contact_stats.update(contact_types)
+
+    return contact_stats
+    
 def parse_stats(cell, out_prefix):
     
     trim_stats = out_prefix + "_trim_stats.txt"
@@ -647,7 +725,7 @@ def parse_stats(cell, out_prefix):
     }, orient="index").T
                 
 
-    alignment_stats = out_prefix + "_alignment_stats.txt"
+    alignment_stats = out_prefix + "_contacts_trim_stats.txt"
     alignment_df = pd.read_table(alignment_stats)
     
     chrl_stats = out_prefix + ".allc.tsv.gz_chrL_stats.txt"

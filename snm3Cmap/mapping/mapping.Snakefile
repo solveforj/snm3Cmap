@@ -8,6 +8,7 @@ r2_adapter = "AGATCGGAAGAGCGTCGTGTAGGGA"
 rule all:
     input:
         expand("{plate}_{cell}_contacts_dedup.txt.gz", plate=plate, cell=cell),
+        expand("{plate}_{cell}_chimeras.txt.gz", plate=plate, cell=cell),
         expand("{plate}_{cell}_trimmed.bam", plate=plate, cell=cell),
         expand("{plate}_{cell}_trim_stats.txt", plate=plate, cell=cell),
         expand("{plate}_{cell}.allc.tsv.gz", plate=plate, cell=cell),
@@ -141,7 +142,8 @@ rule generate_contacts:
     output:
         bam="{plate}_{cell}_trimmed.bam",
         contacts="{plate}_{cell}_contacts_dedup.txt.gz",
-        stats=temp("{plate}_{cell}_alignment_stats.txt")
+        chimeras="{plate}_{cell}_chimeras.txt.gz",
+        stats=temp("{plate}_{cell}_contacts_trim_stats.txt")
     params:
         out_prefix=lambda wildcards: f"{wildcards.plate}_{wildcards.cell}"
     threads:
