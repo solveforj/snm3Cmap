@@ -11,15 +11,13 @@ class ContactGenerator:
     def process_mate(self, all_alignments, primary_alignment, mate, read_group_name):
 
         if len(all_alignments) == 0:
-            return OrderedDict(), {}, None, 0, 0, 0
+            return OrderedDict(), {}, None, False#, 0, 0, 0
     
         read_parts = {}
-        
-        primary_alignment = primary_alignment
-    
+            
         # Get original whole read sequence from primary alignment
         original_sequence = primary_alignment.get_forward_sequence()
-    
+        
         for read in all_alignments:
             if read.is_secondary:
                 if "S" in read.cigarstring:
@@ -33,18 +31,14 @@ class ContactGenerator:
 
 
         if len(seg_keys) == 0:
-            return OrderedDict(), {}, None, 0, 0, 0
+            return OrderedDict(), {}, None, False#, 0, 0, 0
 
-        total_alignments = len(seg_keys)
         has_chimera = read_parts[seg_keys[0]].has_tag("SA")
-        whole_alignments = 0 if has_chimera else 1
-        chimeric_alignments = 1 if has_chimera else 0
-        
-        # Throw out these reads
 
+        # Throw out these reads
         if illegal_overlap(seg_keys):
             self.illegal_overlap_count += len(seg_keys)
-            return OrderedDict(), {}, None, total_alignments, whole_alignments, chimeric_alignments
+            return OrderedDict(), {}, None, has_chimera#, total_alignments, whole_alignments, chimeric_alignments
 
         ordered_reads = OrderedDict()
 
@@ -72,7 +66,7 @@ class ContactGenerator:
             ordered_reads, cut_site_keys, illegal_post_trim = trim_mate(seg_keys, original_sequence, ordered_reads, mate, self.header)
             self.illegal_post_trim_count += illegal_post_trim
         
-        return ordered_reads, cut_site_keys, original_sequence, total_alignments, whole_alignments, chimeric_alignments
+        return ordered_reads, cut_site_keys, original_sequence, has_chimera#, total_alignments, whole_alignments, chimeric_alignments
     
     def process_read_group(self, read_group, read_group_name, bam_out, contacts_out, chimeras_out):
         r1 = []
@@ -86,23 +80,20 @@ class ContactGenerator:
             if read.query_name.split("_")[1] == "1":
                 if not read.is_secondary:
                     r1_primary = read
+                    r1_primary_unique = read.mapping_quality >= self.min_mapq
                 r1.append(read)
             elif read.query_name.split("_")[1] == "2":
                 if not read.is_secondary:
                     r2_primary = read
+                    r2_primary_unique = read.mapping_quality >= self.min_mapq
                 r2.append(read)
 
         # Order reads from 5' to 3'
-        R1, R1_cs_keys, R1_oseq, R1_tot_algn, R1_w_algn, R1_c_algn = self.process_mate(r1, r1_primary, "1", read_group_name)
-        R2, R2_cs_keys, R2_oseq, R2_tot_algn, R2_w_algn, R2_c_algn = self.process_mate(r2, r2_primary, "2", read_group_name)
+        R1, R1_cs_keys, R1_oseq, R1_has_chimera = self.process_mate(r1, r1_primary, "1", read_group_name)
+        R2, R2_cs_keys, R2_oseq, R2_has_chimera = self.process_mate(r2, r2_primary, "2", read_group_name)
 
-        self.r1_total_alignments += R1_tot_algn
-        self.r1_whole_alignments += R1_w_algn
-        self.r1_chimeric_alignments += R1_c_algn
-        
-        self.r2_total_alignments += R2_tot_algn
-        self.r2_whole_alignments += R2_w_algn
-        self.r2_chimeric_alignments += R2_c_algn
+        if len(R1) + len(R2) >= 2:
+            self.at_least_two_alignments += 1
         
         contacts, rule = contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap=20)
 
@@ -113,35 +104,79 @@ class ContactGenerator:
             elif contact_class == "chimera":
                 write_pairsam(hic_algn1, hic_algn2, read_group_name, pair_index, rule, chimeras_out)
 
-        for i in R1:
-            read = R1[i]["trimmed_read"]
-            if not read.is_duplicate:
-                bam_out.write(read)
-            else:
-                self.r1_duplicate_alignments += 1
+        # dupsifter marks all secondary alignments as duplicate if primary alignment is duplicate
+        
+        # Write R1 reads
+        if len(R1) > 0:
+            if not r1_primary.is_duplicate:
+                if R1_has_chimera:
+                    self.r1_chimeric_alignments_dedup += 1
+                else:
+                    self.r1_whole_alignments_dedup += 1
+    
+                # Read is chimeric, but primary alignment will not be included in processed mates
+                if R1_has_chimera and not r1_primary_unique:
+                    bam_out.write(r1_primary)
 
-        for i in R2:
-            read = R2[i]["trimmed_read"]
-            if not read.is_duplicate:
-                bam_out.write(read)
+            if R1_has_chimera:
+                self.r1_chimeric_alignments_dup += 1
             else:
-                self.r2_duplicate_alignments += 1
+                self.r1_whole_alignments_dup += 1
+
+            for i in R1:
+                read = R1[i]["trimmed_read"]
+                if not read.is_duplicate:
+                    self.r1_total_alignments_dedup += 1
+                    bam_out.write(read)
+                
+                self.r1_total_alignments_dup += 1
+
+        # Write R2 reads
+        if len(R2) > 0:
+            if not r2_primary.is_duplicate:
+                if R2_has_chimera:
+                    self.r2_chimeric_alignments_dedup += 1
+                else:
+                    self.r2_whole_alignments_dedup += 1
+    
+                # Read is chimeric, but primary alignment will not be included in processed mates
+                if R2_has_chimera and not r2_primary_unique:
+                    bam_out.write(r2_primary)
+
+            if R2_has_chimera:
+                self.r2_chimeric_alignments_dup += 1
+            else:
+                self.r2_whole_alignments_dup += 1
+
+            for i in R2:
+                read = R2[i]["trimmed_read"]
+                if not read.is_duplicate:
+                    self.r2_total_alignments_dedup += 1
+                    bam_out.write(read)
+
+                self.r2_total_alignments_dup += 1
    
     def process_bam(self):
 
         self.illegal_overlap_count = 0
         self.illegal_post_trim_count = 0
+        self.at_least_two_alignments = 0
         
-        self.r1_total_alignments = 0
-        self.r1_whole_alignments = 0
-        self.r1_chimeric_alignments = 0
-        
-        self.r2_total_alignments = 0
-        self.r2_whole_alignments = 0
-        self.r2_chimeric_alignments = 0
+        self.r1_total_alignments_dup = 0
+        self.r1_whole_alignments_dup = 0
+        self.r1_chimeric_alignments_dup = 0
 
-        self.r1_duplicate_alignments = 0
-        self.r2_duplicate_alignments = 0
+        self.r1_total_alignments_dedup = 0
+        self.r1_whole_alignments_dedup = 0
+        self.r1_chimeric_alignments_dedup = 0
+        
+        self.r2_total_alignments_dup = 0
+        self.r2_whole_alignments_dup = 0
+        self.r2_chimeric_alignments_dup = 0
+
+        self.r2_total_alignments_dedup = 0
+        self.r2_whole_alignments_dedup = 0
+        self.r2_chimeric_alignments_dedup = 0
         
         iter_count = 0
         count = 0
@@ -173,27 +208,30 @@ class ContactGenerator:
 
     def generate_stats(self):
 
-        total_alignments = self.r1_total_alignments + self.r2_total_alignments
-        #duplicated_alignments = self.r1_duplicate_alignments + self.r2_duplicate_alignments
-
-        #if total_alignments > 0:
-        #    alignments_dedup_rate = duplicated_alignments / total_alignments 
-        #else:
-        #    alignments_dedup_rate = np.nan
-            
         stats_dict = {
-            "R1_total_alignments" : self.r1_total_alignments,
-            "R1_whole_aligned_mates" : self.r1_whole_alignments,
-            "R1_chimeric_aligned_mates" : self.r1_chimeric_alignments,
-            "R1_total_aligned_mates" : self.r1_chimeric_alignments +  self.r1_whole_alignments,
+            "R1_total_alignments_dup" : self.r1_total_alignments_dup,
+            "R1_whole_aligned_mates_dup" : self.r1_whole_alignments_dup,
+            "R1_chimeric_aligned_mates_dup" : self.r1_chimeric_alignments_dup,
+            "R1_total_aligned_mates_dup" : self.r1_chimeric_alignments_dup +  self.r1_whole_alignments_dup,
+
+            "R1_total_alignments_dedup" : self.r1_total_alignments_dedup,
+            "R1_whole_aligned_mates_dedup" : self.r1_whole_alignments_dedup,
+            "R1_chimeric_aligned_mates_dedup" : self.r1_chimeric_alignments_dedup,
+            "R1_total_aligned_mates_dedup" : self.r1_chimeric_alignments_dedup +  self.r1_whole_alignments_dedup,
+
+            "R2_total_alignments_dup" : self.r2_total_alignments_dup,
+            "R2_whole_aligned_mates_dup" : self.r2_whole_alignments_dup,
+            "R2_chimeric_aligned_mates_dup" : self.r2_chimeric_alignments_dup,
+            "R2_total_aligned_mates_dup" : self.r2_chimeric_alignments_dup +  self.r2_whole_alignments_dup,
             
-            "R2_total_alignments" : self.r2_total_alignments,
-            "R2_whole_aligned_mates" : self.r2_whole_alignments,
-            "R2_chimeric_aligned_mates" : self.r2_chimeric_alignments,
-            "R2_total_aligned_mates" : self.r2_chimeric_alignments +  self.r2_whole_alignments,
+            "R2_total_alignments_dedup" : self.r2_total_alignments_dedup,
+            "R2_whole_aligned_mates_dedup" : self.r2_whole_alignments_dedup,
+            "R2_chimeric_aligned_mates_dedup" : self.r2_chimeric_alignments_dedup,
+            "R2_total_aligned_mates_dedup" : self.r2_chimeric_alignments_dedup +  self.r2_whole_alignments_dedup,
 
             "discarded_alignments_overlap" : self.illegal_overlap_count,
-            "discarded_alignments_post_trim" : self.illegal_post_trim_count
+            "discarded_alignments_post_trim" : self.illegal_post_trim_count,
+            "pairs_with_multiple_valid_alignments" : self.at_least_two_alignments
 
         }
 
@@ -203,7 +241,10 @@ class ContactGenerator:
 
         stats_df.to_csv(self.stats_path, index=False, sep="\t")
         
-    def __init__(self, bam, out_prefix, 
+    def __init__(self, 
+                 bam, 
+                 out_prefix, 
+                 chrom_sizes,
                  min_mapq=30, 
                  max_molecule_size=750, 
                  max_inter_align_gap=20):
@@ -214,6 +255,7 @@ class ContactGenerator:
 
         self.contacts = f'{out_prefix}_contacts.txt.gz'
         self.contacts_dedup = f'{out_prefix}_contacts_dedup.txt.gz'
+        self.contacts_short = f'{out_prefix}_contacts_dedup.short.gz'
 
         self.chimeras = f'{out_prefix}_chimeras.txt.gz'
         
@@ -224,6 +266,9 @@ class ContactGenerator:
 
         self.process_bam()
 
-        self.contact_stats = dedup_contacts(self.contacts, self.contacts_dedup, save_raw = False)
+        self.contact_stats = dedup_contacts(self.contacts, self.chimeras, self.contacts_dedup, save_raw = False)
+
+        make_short(self.contacts_dedup, self.contacts_short, chrom_sizes)
+        
 
         self.generate_stats()

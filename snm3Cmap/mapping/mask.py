@@ -111,6 +111,9 @@ class OverlapMask:
 
         # Divide reads into R1 and R2
         for read in read_group:
+            # Handles low-MAPQ primary alignments for chimeric reads
+            if read.mapping_quality < self.min_mapq:
+                continue
             if read.query_name.split("_")[1] == "1":
                 r1.append(read)
             elif read.query_name.split("_")[1] == "2":
@@ -150,8 +153,9 @@ class OverlapMask:
                         read_group = [read]
                 self.process_read_group(read_group, read_group_name, bam_out)
         
-    def __init__(self, bam, out_prefix):
-        
+    def __init__(self, bam, out_prefix, min_mapq=30):
+
+        self.min_mapq = min_mapq
         self.trimmed_bam = bam
         self.masked_bam = f'{out_prefix}_masked.bam'
 

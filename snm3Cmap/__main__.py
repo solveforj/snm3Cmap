@@ -99,6 +99,9 @@ def prepare_mapping_register_subparser(subparser):
     parser_req.add_argument('--reference-genome', type=str, default=None, required=True,
                             help='Path to indexed reference genome')
 
+    parser_req.add_argument('--chrom-sizes', type=str, default=None, required=True,
+                            help='Path to chromosome sizes file')
+
     parser_opt = parser.add_argument_group("optional arguments")
 
     parser_opt.add_argument('--jobs', type=int, default=2,
@@ -110,6 +113,23 @@ def prepare_mapping_register_subparser(subparser):
     parser_opt.add_argument('--rerun-incomplete', action="store_true",
                             help="""If set, Snakemake is run with --rerun-incomplete 
                                     (re-run all jobs the output of which is recognized as incomplete)""")
+
+    parser_opt.add_argument('--min-mapq', type=int, default=30,
+                        help='Minimum MAPQ to consider alignment (Pairtools parameter)')
+
+    parser_opt.add_argument('--min-base-quality', type=int, default=20,
+                        help='Minimum base quality for including aligned nucleotides')
+
+    parser_opt.add_argument('--max-molecule-size', type=int, default=750,
+                        help="""The maximal size of a Hi-C molecule; used to rescue single ligations 
+                                (from molecules with three alignments) and to rescue complex ligations.
+                                Used for walks-policy mask, not walks-policy all (Pairtools parameter)""")
+    
+    parser_opt.add_argument('--max-inter-align-gap', type=int, default=20,
+                      help="""Read segments that are not covered by any alignment and longer than the 
+                              specified value are treated as “null” alignments. These null alignments 
+                              convert otherwise linear alignments into walks, and affect how they get reported 
+                              as a Hi-C pair (Pairtools parameter)""")
 
 def contamination_filter_register_subparser(subparser):
     parser = subparser.add_parser('contamination-filter',
@@ -142,6 +162,9 @@ def call_contacts_register_subparser(subparser):
     parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
                             help='Path including name prefix for output files')
 
+    parser_req.add_argument('--chrom-sizes', type=str, default=None, required=True,
+                            help='Path to chromosome sizes file')
+
     parser_opt = parser.add_argument_group("optional arguments")
     
     parser_opt.add_argument('--min-mapq', type=int, default=30,
@@ -172,6 +195,11 @@ def mask_overlaps_register_subparser(subparser):
                             
     parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
                             help='Path including name prefix for output bam file')
+
+    parser_opt = parser.add_argument_group("optional arguments")
+
+    parser_req.add_argument('--min-mapq', type=int, default=30, required=True,
+                            help='Minimum MAPQ to consider alignment')
 
 def bam_to_allc_register_subparser(subparser):
     parser = subparser.add_parser('bam-to-allc',
@@ -223,6 +251,14 @@ def aggregate_qc_stats_register_subparser(subparser):
                             
     parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
                             help='Path including name prefix for output stats file')
+
+    parser_opt = parser.add_argument_group("optional arguments")
+
+    parser_opt.add_argument('--min-mapq', type=int, default=30,
+                            help='Minimum MAPQ score for including aligned reads')
+
+    parser_opt.add_argument('--min-base-quality', type=int, default=20,
+                            help='Minimum base quality for including aligned nucleotides')
     
 
 def main():

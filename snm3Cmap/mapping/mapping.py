@@ -7,6 +7,11 @@ def prepare_mapping(plate_info,
                     demultiplex_directory, 
                     barcodes,
                     reference_genome,
+                    chrom_sizes,
+                    min_mapq=30,
+                    max_molecule_size=750,
+                    max_inter_align_gap=20,
+                    min_base_quality=20,
                     jobs=2,
                     nolock=False,
                     rerun_incomplete=False
@@ -28,7 +33,12 @@ def prepare_mapping(plate_info,
     
     params = {
         "biscuit_threads" : f'{biscuit_threads}',
-        "reference_path" : f'"{reference_genome}"'
+        "reference_path" : f'"{reference_genome}"',
+        "chrom_sizes" : f'"{chrom_sizes}"',
+        "min_mapq" : f'{min_mapq}',
+        "max_molecule_size" : f'{max_molecule_size}',
+        "max_inter_align_gap" : f'{max_inter_align_gap}',
+        "min_base_quality" : f'{min_base_quality}'
     }
 
     nolock = "--nolock" if nolock else ""
@@ -39,7 +49,7 @@ def prepare_mapping(plate_info,
             line = line.strip()
             if len(line) == 0:
                 continue
-            line = line.split("\t")
+            line = line.split()
             fastq_directory, plate = line[0], line[1]
             
             plate_run_directory = os.path.join(demultiplex_directory, plate)

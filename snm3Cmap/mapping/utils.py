@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import subprocess
 import shlex
+import gzip
 
 rng = np.random.default_rng(1)
 
@@ -613,7 +614,8 @@ def build_cigar(read, pairs, start_index, end_index):
 
     return updated_cigartuples
 
-def dedup_contacts(dup_path, dedup_path, save_raw = True):
+
+def dedup_contacts(dup_contacts_path, chimeras_path, dedup_contacts_path, save_raw = True):
     columns = ["read", 
                "chrom1", "pos1", "chrom2", 
                "pos2", "strand1", "strand2", 
@@ -621,10 +623,11 @@ def dedup_contacts(dup_path, dedup_path, save_raw = True):
 
     contact_stats = {
         "total_contacts" : 0,
-        "contacts_dedup_rate" : 0,
+        "contacts_dup_rate" : 0,
         "intra1kb_contacts" : 0,
         "intra10kb_contacts" : 0,
-        "inter_contacts" : 0
+        "inter_contacts" : 0,
+        "read_pairs_with_contacts" : 0
     }
 
     contact_types = {"R1" : 0,
@@ -639,7 +642,7 @@ def dedup_contacts(dup_path, dedup_path, save_raw = True):
                  }
 
     try:
-        df = pd.read_table(dup_path, header=None)
+        df = pd.read_table(dup_contacts_path, header=None)
         df.columns = columns
     except ValueError:
         df = pd.DataFrame(columns=columns)
@@ -655,15 +658,18 @@ def dedup_contacts(dup_path, dedup_path, save_raw = True):
     df_inter = df_dedup[df_dedup["chrom1"] != df_dedup["chrom2"]]
 
     if len(df) > 0:
-        contact_stats["contacts_dedup_rate"] = dedup_rate = 1 - (len(df_dedup) / len(df))
+        contact_stats["contacts_dup_rate"] = dedup_rate = 1 - (len(df_dedup) / len(df))
     else:
-        contact_stats["contacts_dedup_rate"] = np.nan
+        contact_stats["contacts_dup_rate"] = np.nan
 
     contact_stats["intra1kb_contacts"] = len(df_intra_1kb)
     contact_stats["intra10kb_contacts"] = len(df_intra_10kb)
     contact_stats["inter_contacts"] = len(df_inter)
     
     report_contacts = pd.concat([df_intra_1kb, df_inter])
+
+    contact_stats["read_pairs_with_contacts"] = len(report_contacts["read"].unique())
+    
     contact_types_emp = {**dict(report_contacts["contact_type"].value_counts()), 
            **dict(report_contacts["pair_type"].value_counts())}
     for i in contact_types_emp:
@@ -671,16 +677,104 @@ def dedup_contacts(dup_path, dedup_path, save_raw = True):
 
     contact_stats["total_contacts"] = len(report_contacts)
 
-    report_contacts.to_csv(dedup_path, header=False, index=False, sep="\t")
+    report_contacts.to_csv(dedup_contacts_path, header=False, index=False, sep="\t")
     
     if not save_raw:
-        subprocess.run(shlex.split(f'rm -f {dup_path}'), check=True)
+        subprocess.run(shlex.split(f'rm -f {dup_contacts_path}'), check=True)
 
     contact_stats.update(contact_types)
 
+    try:
+        chimeras = pd.read_table(chimeras_path, header=None)
+        chimeras.columns = columns
+    except ValueError:
+        chimeras = pd.DataFrame(columns=columns)
+        
+    chimeras_dedup = chimeras.drop_duplicates(["chrom1", "pos1", 
+                                   "chrom2", "pos2", 
+                                   "strand1", "strand2"])
+
+    contact_stats["non_ligation_contacts"] = len(chimeras_dedup)
+
     return contact_stats
+
+def make_short(contacts_path, short_path, chrom_sizes):
+
+    chrom_order = {}
+    index = 0
+    with open(chrom_sizes) as c_in:
+        for line in c_in:
+            line = line.strip().split()
+            chrom = line[0]
+            chrom_order[chrom] = index
+            index += 1
+
+    with gzip.open(contacts_path, 'rt') as contacts_in, \
+        gzip.open(short_path, 'wt') as short_out:
+
+        for line in contacts_in:
+            line = line.strip().split("\t")
+            
+            chrom1 = line[1]
+            pos1 = line[2]
+            chrom2 = line[3]
+            pos2 = line[4]
+            
+            strand1 = line[5]
+            strand1 = "0" if strand1 == "+" else "1"
+            
+            strand2 = line[6]
+            strand2 = "0" if strand2 == "+" else "1"
+
+            if chrom1 == chrom2:
+                if int(pos1) > int(pos2):
+                    short_contact = [strand2, chrom2, pos2, "0", strand1, chrom1, pos1, "1"]
+                else:
+                    short_contact = [strand1, chrom1, pos1, "0", strand2, chrom2, pos2, "1"]
+            elif chrom_order[chrom1] > chrom_order[chrom2]:
+                short_contact = [strand2, chrom2, pos2, "0", strand1, chrom1, pos1, "1"]
+            else:
+                short_contact = [strand1, chrom1, pos1, "0", strand2, chrom2, pos2, "1"]
+
+            short_contact = "\t".join(short_contact) + "\n"
+
+            short_out.write(short_contact)
+            
+
+def compute_genome_coverage(bam, min_mapq, min_base_quality, keep_dup=False):
+    # Compute genome coverage
+
+    ff_val = "QCFAIL,UNMAP"
+    if not keep_dup:
+        ff_val = "DUP," + ff_val
+
+    command1 = f"samtools coverage -q {min_mapq} -Q {min_base_quality} -H --ff {ff_val} {bam}"
+    command2 = "awk -v OFS='\t' -v nn=0 '{{nn += $5}} END {print nn } '"
+    p1 = subprocess.Popen(shlex.split(command1), stdout=subprocess.PIPE)
+    p2 = subprocess.run(shlex.split(command2), stdin=p1.stdout, capture_output=True, text=True)
+    out = p2.stdout.strip()
+    reference_coverage = int(out)
+    return reference_coverage
+
+def compute_mapped_nucleotides(bam, min_mapq, min_base_quality, keep_dup=False):
+    # Compute mapped nucleotides
+
+    add_flags = "SECONDARY"
+    if keep_dup:
+        add_flags += ",DUP"
     
-def parse_stats(cell, out_prefix):
+    command1 = f"samtools depth -Q {min_mapq} -q {min_base_quality} -g {add_flags} {bam}"
+    command2 = "awk -v nn=0 '{nn+=$3} END { print nn}'"
+    p1 = subprocess.Popen(shlex.split(command1), stdout=subprocess.PIPE)
+    p2 = subprocess.run(shlex.split(command2), stdin=p1.stdout, capture_output=True, text=True)
+    out = p2.stdout.strip()
+    mapped_read_bases = int(out)
+    return mapped_read_bases
+
+def parse_stats(cell, 
+                out_prefix, 
+                min_mapq = 30, 
+                min_base_quality = 20):
     
     trim_stats = out_prefix + "_trim_stats.txt"
     with open(trim_stats) as f:
@@ -688,23 +782,23 @@ def parse_stats(cell, out_prefix):
         for line in f:
             if line_count == 1:
                 tstats = line.strip().split("\t")
-                in_pairs = tstats[1]
+                in_pairs = float(tstats[1])
             elif line_count == 3:
                 tstats = line.strip().split("\t")
-                out_r1 = tstats[6]
+                out_r1 = float(tstats[6])
             elif line_count == 5:
                 tstats = line.strip().split("\t")
-                out_r2 = tstats[6]
+                out_r2 = float(tstats[6])
             line_count += 1
     trim_df = pd.DataFrame.from_dict({"demultiplexed_pairs": in_pairs,
                                          "trimmed_R1_mates" : out_r1,
                                          "trimmed_R2_mates" : out_r2
                                         }, orient="index").T
 
-    contam_stats = out_prefix + "_contam_stats.txt"
-    contam_df = pd.read_table(contam_stats)
+    contam_stats = f"{out_prefix}_contam_stats.txt"
+    contam_df = pd.read_table(contam_stats).astype(float)
 
-    dup_stats = out_prefix + "_dupsifter_stats.txt"
+    dup_stats = f"{out_prefix}_dupsifter_stats.txt"
     dup_count = 0
     with open(dup_stats) as f:
         line_count = 0
@@ -721,22 +815,58 @@ def parse_stats(cell, out_prefix):
     dedup_df = pd.DataFrame.from_dict({
         "pre_dedup_mates" : pre_dedup_count,
         "duplicate_mates" : dup_count,
-        "algn_dup_rate" : dup_rate
+        "alignment_dup_rate" : dup_rate
     }, orient="index").T
                 
 
-    alignment_stats = out_prefix + "_contacts_trim_stats.txt"
+    alignment_stats = f"{out_prefix}_contacts_trim_stats.txt"
     alignment_df = pd.read_table(alignment_stats)
+
+    methylation_stats = out_prefix + ".allc.tsv.gz_methylation_stats.txt"
+    methylation_df = pd.read_table(methylation_stats)
+
+    cell_df = pd.DataFrame([cell], columns=["cell"])
+
+    trimmed_bam = f"{out_prefix}_trimmed_sorted.bam"
+    mkdup_bam = f"{out_prefix}_mkdup_sorted.bam"
+    masked_bam = f"{out_prefix}_masked_sorted.bam"
+
+    genome_cov_dup = compute_genome_coverage(mkdup_bam, min_mapq, min_base_quality, keep_dup=True)
+    genome_cov_dedup = compute_genome_coverage(mkdup_bam, min_mapq, min_base_quality, keep_dup=False)
+    genome_cov_dedup_trim = compute_genome_coverage(trimmed_bam, min_mapq, min_base_quality, keep_dup=False)
+    genome_cov_dedup_mask = compute_genome_coverage(masked_bam, min_mapq, min_base_quality, keep_dup=False)
+
+    mapped_nuc_dup = compute_mapped_nucleotides(mkdup_bam, min_mapq, min_base_quality, keep_dup=True)
+    mapped_nuc_dedup = compute_mapped_nucleotides(mkdup_bam, min_mapq, min_base_quality, keep_dup=False)
+    mapped_nuc_dedup_trim = compute_mapped_nucleotides(trimmed_bam, min_mapq, min_base_quality, keep_dup=False)
+    mapped_nuc_dedup_mask = compute_mapped_nucleotides(masked_bam, min_mapq, min_base_quality, keep_dup=False)
     
-    chrl_stats = out_prefix + ".allc.tsv.gz_chrL_stats.txt"
-    chrl_df = pd.read_table(chrl_stats)
+    cov_map_df = pd.DataFrame([[genome_cov_dup, 
+                                genome_cov_dedup,
+                                genome_cov_dedup_trim,
+                                genome_cov_dedup_mask,
+                                mapped_nuc_dup,
+                                mapped_nuc_dedup,
+                                mapped_nuc_dedup_trim,
+                                mapped_nuc_dedup_mask
+                               ]], 
+                              columns=["reference_coverage_dup",
+                                       "reference_coverage_dedup",
+                                       "reference_coverage_dedup_trim",
+                                       "reference_coverage_dedup_mask",
+                                       "mapped_nucleotides_dup",
+                                       "mapped_nucleotides_dedup",
+                                       "mapped_nucleotides_dedup_trim",
+                                       "mapped_nucleotides_dedup_mask",
+                                      ]
+                             )
 
-    all_stats = pd.concat([trim_df, contam_df, dedup_df, alignment_df, chrl_df], axis=1)
+    all_stats = pd.concat([cell_df, trim_df, contam_df, dedup_df, alignment_df, cov_map_df, methylation_df], axis=1)
 
-    all_stats.index = [cell]
+    all_stats = all_stats.T
 
-    out_file = out_prefix + "_qc_stats.txt"
+    out_file = f"{out_prefix}_qc_stats.txt"
 
-    all_stats.to_csv(out_file, sep="\t")
+    all_stats.to_csv(out_file, sep="\t", header=False)
 
     

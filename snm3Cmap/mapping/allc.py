@@ -255,6 +255,153 @@ def open_gz(file_path, mode="r", compresslevel=3, threads=1, region=None):
             return PipedGzipWriter(file_path, mode, compresslevel, threads=threads)
         except OSError:
             return gzip.open(file_path, mode, compresslevel=compresslevel)
+
+class PipedBamReader(Closing):
+    # decompression can't be parallel even in pigz, so there is not thread/cpu parameter
+    def __init__(self, path, region=None, mode="r", include_header=True, samtools_parms_str=None):
+        if mode not in ("r", "rt", "rb"):
+            raise ValueError(f"Mode is {mode}, but it must be 'r', 'rt' or 'rb'")
+        if "b" not in mode:
+            encoding = "utf8"
+        else:
+            encoding = None
+
+        command_list = ["samtools", "view"]
+        if include_header:
+            command_list.append("-h")
+        if samtools_parms_str is not None:
+            command_list.extend(samtools_parms_str.split(" "))
+
+        if region is None:
+            self.process = Popen(command_list + [path], stdout=PIPE, stderr=PIPE, encoding=encoding)
+        else:
+            self.process = Popen(
+                command_list + [path] + region.split(" "),
+                stdout=PIPE,
+                stderr=PIPE,
+                encoding=encoding,
+            )
+
+        self.name = path
+        self.file = self.process.stdout
+        self._stderr = self.process.stderr
+        self.closed = False
+        # Give gzip a little bit of time to report any errors
+        # (such as a non-existing file)
+        time.sleep(0.01)
+        self._raise_if_error()
+
+    def close(self):
+        self.closed = True
+        return_code = self.process.poll()
+        if return_code is None:
+            # still running
+            self.process.terminate()
+        self._raise_if_error()
+
+    def __iter__(self):
+        yield from self.file
+        self.process.wait()
+        self._raise_if_error()
+
+    def readline(self):
+        return self.file.readline()
+
+    def _raise_if_error(self):
+        """Raise IOError if process is not running anymore and the exit code is nonzero."""
+        return_code = self.process.poll()
+        if return_code is not None and return_code != 0:
+            message = self._stderr.read().strip()
+            raise OSError(message)
+
+    def read(self, *args):
+        data = self.file.read(*args)
+        if len(args) == 0 or args[0] <= 0:
+            # wait for process to terminate until we check the exit code
+            self.process.wait()
+        self._raise_if_error()
+        return data
+
+
+class PipedBamWriter(Closing):
+    def __init__(self, path, mode="wt", threads=1):
+        """
+        Open a pipe to samtools view, which will write to the given path.
+
+        mode -- one of 'w', 'wt', 'wb', 'a', 'at', 'ab'
+        threads (int) -- number of samtools threads
+        """
+        if mode not in ("w", "wt", "wb", "a", "at", "ab"):
+            raise ValueError(f"Mode is '{mode}', but it must be 'w', 'wt', 'wb', 'a', 'at' or 'ab'")
+
+        self.outfile = open(path, mode)
+        self.devnull = open(os.devnull, mode)
+        self.closed = False
+        self.name = path
+
+        kwargs = {"stdin": PIPE, "stdout": self.outfile, "stderr": self.devnull}
+        # Setting close_fds to True in the Popen arguments is necessary due to
+        # <http://bugs.python.org/issue12786>.
+        # However, close_fds is not supported on Windows. See
+        # <https://github.com/marcelm/cutadapt/issues/315>.
+        if sys.platform != "win32":
+            kwargs["close_fds"] = True
+
+        try:
+            samtools_args = ["samtools", "view", "-b", "-@", str(threads)]
+            self.process = Popen(samtools_args, **kwargs)
+            self.program = "samtools"
+        except OSError:
+            self.outfile.close()
+            self.devnull.close()
+            raise
+        self._file = codecs.getwriter("utf-8")(self.process.stdin)
+        return
+
+    def write(self, arg):
+        self._file.write(arg)
+
+    def close(self):
+        self.closed = True
+        self._file.close()
+        return_code = self.process.wait()
+        self.outfile.close()
+        self.devnull.close()
+        if return_code != 0:
+            raise OSError(f"Output {self.program} process terminated with exit code {return_code}")
+
+def has_bai(filename):
+    index_path = filename + ".bai"
+    if os.path.exists(index_path):
+        return True
+    else:
+        return False
+
+def open_bam(
+    file_path,
+    mode="r",
+    region=None,
+    include_header=True,
+    samtools_parms_str=None,
+    threads=1,
+):
+    if "r" in mode:
+        if region is not None:
+            if not has_bai(file_path):
+                raise FileNotFoundError(f".bai index file not found for {file_path}. Index before region query.")
+        try:
+            return PipedBamReader(
+                file_path,
+                region=region,
+                mode=mode,
+                include_header=include_header,
+                samtools_parms_str=samtools_parms_str,
+            )
+        except OSError as e:
+            raise e
+    else:
+        return PipedBamWriter(file_path, mode, threads=threads)
+
             
 def open_allc(file_path, mode="r", compresslevel=3, threads=1, region=None):
     """
@@ -333,8 +480,8 @@ def _convert_bam_strandness(in_bam_path, out_bam_path):
 
 def chrL_stats(output_path):
     command1 = f"zcat {output_path}"
-    command2 = "awk -v OFS='\t' -v mCH=0 -v CH=0 '{ if (($1 == \"chrL\") && ($4 ~ /^C(A|T|C)/)) {mCH += $5; CH += $6 }} END {print mCH, CH } '"
-    command3 = "awk -v OFS='\t' -v mCG=0 -v CG=0 '{ if (($1 == \"chrL\") && ($4 ~ /^C(G)/)) {mCG += $5; CG += $6 }} END {print mCG, CG } '"
+    command2 = "awk -v OFS='\t' -v mCH=0 -v CH=0 '{ if (($4 ~ /^[ATCG]C[ATC]/) && ($4 != \"CCAGG\") && ($4 != \"CCTGG\")) {mCH += $5; CH += $6 }} END {print mCH, CH } '"
+    command3 = "awk -v OFS='\t' -v mCG=0 -v CG=0 '{ if (($4 ~ /^[ATCG]C[G]/) && ($4 != \"CCAGG\") && ($4 != \"CCTGG\")) {mCG += $5; CG += $6 }} END {print mCG, CG } '"
 
     p1 = subprocess.Popen(shlex.split(command1), stdout=subprocess.PIPE)
     p2 = subprocess.run(shlex.split(command2), stdin=p1.stdout, capture_output=True, text=True)
@@ -360,9 +507,47 @@ def chrL_stats(output_path):
     else:
         mcg_fraction = np.nan
 
-    with open(output_path + "_chrL_stats.txt","w") as f:
-        f.write("\t".join(["mCG/CG_chrL", "mCH/CH_chrL"]) + "\n")
-        f.write("\t".join([str(mcg_fraction), str(mch_fraction)]) + "\n")
+    # with open(output_path + "_stats.txt","w") as f:
+    #     f.write("\t".join(["mCG/CG_chrL", "mCH/CH_chrL"]) + "\n")
+    #     f.write("\t".join([str(mcg_fraction), str(mch_fraction)]) + "\n")
+
+    return mcg_fraction, mch_fraction
+
+
+def global_stats(output_path):
+    command1 = f"zcat {output_path}"
+    command2 = "awk -v OFS='\t' -v mCH=0 -v CH=0 '{ if (($1 != \"chrL\") && ($4 ~ /^C[ATC]/)) {mCH += $5; CH += $6 }} END {print mCH, CH } '"
+    command3 = "awk -v OFS='\t' -v mCG=0 -v CG=0 '{ if (($1 != \"chrL\") && ($4 ~ /^C[G]/)) {mCG += $5; CG += $6 }} END {print mCG, CG } '"
+
+    p1 = subprocess.Popen(shlex.split(command1), stdout=subprocess.PIPE)
+    p2 = subprocess.run(shlex.split(command2), stdin=p1.stdout, capture_output=True, text=True)
+    
+    out = p2.stdout.strip().split("\t")
+    mch = int(out[0])
+    ch = int(out[1])
+    
+    if ch > 0:
+        mch_fraction = mch / ch
+    else:
+        mch_fraction = np.nan
+    
+    p1 = subprocess.Popen(shlex.split(command1), stdout=subprocess.PIPE)
+    p2 = subprocess.run(shlex.split(command3), stdin=p1.stdout, capture_output=True, text=True)
+    
+    out = p2.stdout.strip().split("\t")
+    mcg = int(out[0])
+    cg = int(out[1])
+    
+    if cg > 0:
+        mcg_fraction = mcg / cg
+    else:
+        mcg_fraction = np.nan
+
+    # with open(output_path + "_stats.txt","w") as f:
+    #     f.write("\t".join(["mCG/CG_global", "mCH/CH_global"]) + "\n")
+    #     f.write("\t".join([str(mcg_fraction), str(mch_fraction)]) + "\n")
+
+    return mcg_fraction, mch_fraction
 
 
 def _read_faidx(faidx_path):
@@ -464,7 +649,7 @@ def _bam_to_allc_worker(
     cur_out_pos = 0
     cov_dict = collections.defaultdict(int)  # context: cov_total
     mc_dict = collections.defaultdict(int)  # context: mc_total
-
+    
     # process mpileup result
     for line in result_handle:
         total_line += 1
@@ -691,9 +876,6 @@ def bam_to_allc(
             "Make sure you use the same genome FASTA file for mapping and bam-to-allc."
         )
 
-
-    regions = None
-
     # Output path
     input_path = pathlib.Path(bam_path)
     file_dir = input_path.parent
@@ -719,14 +901,43 @@ def bam_to_allc(
         tabix=tabix,
         save_count_df=save_count_df,
     )
+    
+    chrL_output_path = output_path.replace(".allc", "_chrL.allc")
+    
+    
+    result = _bam_to_allc_worker(
+        bam_path,
+        reference_fasta,
+        fai_df,
+        chrL_output_path,
+        region="chrL",
+        num_upstr_bases=1,
+        num_downstr_bases=3,
+        buffer_line_number=buffer_line_number,
+        min_mapq=min_mapq,
+        min_base_quality=min_base_quality,
+        compress_level=compress_level,
+        tabix=False,
+        save_count_df=False,
+    )
 
-    chrL_stats(output_path)
+    chrL_mcg_fraction, chrL_mch_fraction = chrL_stats(chrL_output_path)
+    global_mcg_fraction, global_mch_fraction = global_stats(output_path)
 
+    methylation_stats = [chrL_mcg_fraction, chrL_mch_fraction,
+                         global_mcg_fraction, global_mch_fraction]
+    methylation_stats = [str(i) for i in methylation_stats]
+    
+    with open(output_path + "_methylation_stats.txt","w") as f:
+        f.write("\t".join(["mCG/CG_chrL", "mCH/CH_chrL", "mCG/CG_global", "mCH/CH_global"]) + "\n")
+        f.write("\t".join(methylation_stats) + "\n")
 
     # clean up temp bam
     if convert_bam_strandness:
         # this bam path is the temp file path
         subprocess.check_call(["rm", "-f", bam_path])
         subprocess.check_call(["rm", "-f", f"{bam_path}.bai"])
+
+    subprocess.check_call(["rm", "-f", f"{chrL_output_path}"])
 
     return result

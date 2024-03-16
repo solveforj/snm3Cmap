@@ -23,14 +23,14 @@ def prepare_demultiplex(plate_info,
             line = line.strip()
             if len(line) == 0:
                 continue
-            line = line.split("\t")
+            line = line.split()
             fastq_directory, plate = line[0], line[1]
             plate_run_directory = os.path.join(output_directory, plate)
             Path(plate_run_directory).mkdir(parents=True, exist_ok=True)
 
             plate_config = {}
             for mate in ["R1", "R2"]: 
-                r_fn = f"{fastq_directory}*{plate}*{mate}*fastq.gz"
+                r_fn = f"{fastq_directory}*{plate}[-_]*{mate}*fastq.gz"
                 plate_config[mate] = r_fn
 
             plate_config["out_dir"] = plate_run_directory
