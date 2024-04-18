@@ -34,7 +34,9 @@ class ContaminationFilter:
             pysam.AlignmentFile(self.out, "wb", header=bam_in.header) as bam_out:
             
             read_group = None
-            read_group_reads = []
+            read_group_reads = None
+            iter_count = 0
+
             um = 0
             m = -1
             
@@ -51,8 +53,10 @@ class ContaminationFilter:
                 else:
                     r_m, r_um = self.compute_non_cg_methylation(read)
         
-                if read_group == None:
+                if iter_count == 0:
                     read_group = read_name
+                    read_group_reads = []
+                    iter_count = 1
                 if read_name == read_group:
                     read_group_reads.append(read)
                     um += r_um
@@ -80,6 +84,8 @@ class ContaminationFilter:
                     m = -1
                     um += r_um
                     m += r_m
+            if read_group == None:
+                return
             if (um + m) < 3 or (m / (um + m)) < 0.7:
                 for r in read_group_reads:
                     bam_out.write(r)
@@ -91,19 +97,9 @@ class ContaminationFilter:
                 if mate == "1":
                     self.r1_removed += 1
                 else:
-                    self.r2_removed += 1
-
-        with open(self.stats, "w") as f:
-            f.write("\t".join(["R1_contam_pass", "R1_contam_fail", 
-                               "R2_contam_pass", "R2_contam_fail"]) + "\n")
-            f.write("\t".join([str(i) for i in [
-                self.r1_kept, self.r1_removed, 
-                self.r2_kept, self.r2_removed]]) + "\n")            
+                    self.r2_removed += 1          
 
     
-
-
-
     def __init__(self, bam, mapq_threshold, out_prefix):
 
         self.bam = bam
@@ -114,3 +110,10 @@ class ContaminationFilter:
         self.stats = f"{out_prefix}_contam_stats.txt"
 
         self.filter_bam()
+
+        with open(self.stats, "w") as f:
+            f.write("\t".join(["R1_contam_pass", "R1_contam_fail", 
+                               "R2_contam_pass", "R2_contam_fail"]) + "\n")
+            f.write("\t".join([str(i) for i in [
+                self.r1_kept, self.r1_removed, 
+                self.r2_kept, self.r2_removed]]) + "\n")  

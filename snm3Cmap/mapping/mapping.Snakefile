@@ -7,14 +7,14 @@ r2_adapter = "AGATCGGAAGAGCGTCGTGTAGGGA"
 
 rule all:
     input:
-        expand("{plate}_{cell}_contacts_dedup.txt.gz", plate=plate, cell=cell),
-        expand("{plate}_{cell}_contacts_dedup.short.gz", plate=plate, cell=cell),
-        expand("{plate}_{cell}_chimeras.txt.gz", plate=plate, cell=cell),
+        expand("{plate}_{cell}_contacts.dedup.pairs.gz", plate=plate, cell=cell),
+        expand("{plate}_{cell}_chimeras.dedup.pairs.gz", plate=plate, cell=cell),
+        expand("{plate}_{cell}_contacts.short.gz", plate=plate, cell=cell),
         expand("{plate}_{cell}_trimmed.bam", plate=plate, cell=cell),
         expand("{plate}_{cell}.allc.tsv.gz", plate=plate, cell=cell),
         expand("{plate}_{cell}.allc.tsv.gz.tbi", plate=plate, cell=cell),
         expand("{plate}_{cell}.allc.tsv.gz.count.csv", plate=plate, cell=cell),
-        expand("{plate}_{cell}_qc_stats.txt", plate=plate, cell=cell),
+        expand("{plate}_{cell}_qc_stats.txt", plate=plate, cell=cell)
 
 rule trim:
     input:
@@ -141,10 +141,10 @@ rule generate_contacts:
         bam = rules.mark_duplicates.output.bam
     output:
         bam="{plate}_{cell}_trimmed.bam",
-        contacts="{plate}_{cell}_contacts_dedup.txt.gz",
-        short="{plate}_{cell}_contacts_dedup.short.gz",
-        chimeras="{plate}_{cell}_chimeras.txt.gz",
-        stats=temp("{plate}_{cell}_contacts_trim_stats.txt")
+        contacts="{plate}_{cell}_contacts.dedup.pairs.gz",
+        chimeras="{plate}_{cell}_chimeras.dedup.pairs.gz",
+        short="{plate}_{cell}_contacts.short.gz",
+        stats=temp("{plate}_{cell}_alignment_stats.txt")
     params:
         out_prefix=lambda wildcards: f"{wildcards.plate}_{wildcards.cell}"
     threads:
@@ -157,6 +157,9 @@ rule generate_contacts:
         '--min-mapq {min_mapq} '
         '--max-molecule-size {max_molecule_size} '
         '--max-inter-align-gap {max_inter_align_gap} '
+        '{full_bam} '
+        '--min-intra-dist {min_intra_dist} '
+        '--threads {threads} '
 
 rule mask:
     input:
@@ -234,7 +237,7 @@ rule bam_to_allc:
         '--min-base-quality {min_base_quality} '
         '--save-count-df ' 
 
-rule aggregate_stats:
+rule aggregate_stats: 
     input:
         rules.trim.output.stats,
         rules.contam_filter.output.stats,
@@ -245,15 +248,14 @@ rule aggregate_stats:
         rules.coord_sort_mkdup.output.bam,
         rules.coord_sort_masked.output.bam
     output:
-        "{plate}_{cell}_qc_stats.txt"
+        stats="{plate}_{cell}_qc_stats.txt"
     params:
         out_prefix = lambda wildcards: f"{wildcards.plate}_{wildcards.cell}"
     threads:
         1
     shell:
-        'snm3Cmap  aggregate-qc-stats '
+        'snm3Cmap aggregate-qc-stats '
         '--cell {params.out_prefix} '
         '--out-prefix {params.out_prefix} '
         '--min-mapq {min_mapq} '
         '--min-base-quality {min_base_quality} '
-    

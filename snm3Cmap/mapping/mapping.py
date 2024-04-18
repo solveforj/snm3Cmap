@@ -14,7 +14,9 @@ def prepare_mapping(plate_info,
                     min_base_quality=20,
                     jobs=2,
                     nolock=False,
-                    rerun_incomplete=False
+                    rerun_incomplete=False,
+                    full_bam=False,
+                    min_intra_dist=1000
                    ):
 
     smk_path = 'mapping.Snakefile'
@@ -30,6 +32,8 @@ def prepare_mapping(plate_info,
                 cell_ids.append(line[1:])
 
     biscuit_threads = jobs // 2 if jobs > 1 else 1
+
+    full_bam = "--full-bam" if full_bam else ""
     
     params = {
         "biscuit_threads" : f'{biscuit_threads}',
@@ -38,7 +42,9 @@ def prepare_mapping(plate_info,
         "min_mapq" : f'{min_mapq}',
         "max_molecule_size" : f'{max_molecule_size}',
         "max_inter_align_gap" : f'{max_inter_align_gap}',
-        "min_base_quality" : f'{min_base_quality}'
+        "min_base_quality" : f'{min_base_quality}',
+        "full_bam" : f'"{full_bam}"',
+        "min_intra_dist" : f'{min_intra_dist}'
     }
 
     nolock = "--nolock" if nolock else ""

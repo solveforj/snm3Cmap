@@ -8,6 +8,11 @@ import gzip
 
 rng = np.random.default_rng(1)
 
+pairs_columns = ["read", 
+           "chrom1", "pos1", "chrom2", 
+           "pos2", "strand1", "strand2", 
+           "pair_type", "rule", "reads"]
+
 # R1 is G to A mutated in unmethylated C
 R1_CUT_SITES = [
     'CATG',  # NlaIII
@@ -30,9 +35,153 @@ r2_cut = re.compile("(" + "|".join(R2_CUT_SITES) + ")")
 
 ref_cut = re.compile("(GATC|CATG)")
 
+def process_chrom_sizes(chrom_sizes_file):
+    chrom_sizes = {}
+    with open(chrom_sizes_file) as csf:
+        for line in csf:
+            line = line.strip().split()
+            chrom = line[0]
+            size = int(line[1])
+            chrom_sizes[chrom] = size
+    return chrom_sizes
+    
+def initialize_pairs_file(handle, chrom_sizes):
+
+    handle.write("## pairs format v1.0\n")
+    for chrom in chrom_sizes:
+        handle.write(f'#chromsize: {chrom} {str(chrom_sizes[chrom])}\n')
+    handle.write("#columns: readID chrom1 pos1 chrom2 pos2 strand1 strand2 pair_type rule reads\n")
+
+def process_pairs(out_prefix, 
+                  chrom_sizes,
+                  pair_class="contacts", 
+                  raw_pair_count=0, 
+                  threads=1):
+
+    pairs_dup_rate = np.nan
+    raw_pairs = f"{out_prefix}_{pair_class}.pairs.gz"
+    flip_pairs = f"{out_prefix}_{pair_class}.flip.pairs.gz"
+    sort_pairs = f"{out_prefix}_{pair_class}.sort.pairs.gz"
+    dedup_pairs = f"{out_prefix}_{pair_class}.dedup.pairs.gz"
+    stats = f"{out_prefix}_{pair_class}_dedup_stats.txt"
+    
+    if raw_pair_count == 0:
+        subprocess.run(shlex.split(f'cp {raw_pairs} {dedup_pairs}'), check=True)
+        subprocess.run(shlex.split(f'rm -f {raw_pairs}'), check=True)
+        return pairs_dup_rate
+
+    flip_cmd = f"pairtools flip --chroms-path {chrom_sizes} --output {flip_pairs} {raw_pairs}"
+    sort_cmd = f"pairtools sort --output {sort_pairs} --nproc {threads} {flip_pairs}"
+    dedup_cmd = f"pairtools dedup -p {threads} --output {dedup_pairs} --output-stats {stats} {sort_pairs}"
+
+    subprocess.run(shlex.split(flip_cmd), check=True)
+    subprocess.run(shlex.split(sort_cmd), check=True)
+    subprocess.run(shlex.split(dedup_cmd), check=True)
+
+    with open(stats) as f:
+        for line in f:
+            if "summary/frac_dups" in line:
+                try:
+                    pairs_dup_rate = float(line.strip().split()[1])
+                except ValueError:
+                    pairs_dup_rate = np.nan
+
+    subprocess.run(shlex.split(f'rm -f {raw_pairs} {flip_pairs} {sort_pairs} {stats}'), check=True)
+
+    return pairs_dup_rate
+
+def make_short(out_prefix):
+    
+    short_path = f"{out_prefix}_contacts.short.gz"
+
+    try:
+        contacts = pd.read_table(pairtools_contacts, comment="#", header=None)
+        contacts.columns = pairs_columns
+    except:
+        contacts = pd.DataFrame(columns = pairs_columns)
+
+    contacts["frag1"] = ["0"] * len(contacts)
+    contacts["frag2"] = ["1"] * len(contacts)
+    contacts["strand1"] = contacts["strand1"].apply(lambda x : "0" if x == "+" else "1")
+    contacts["strand2"] = contacts["strand2"].apply(lambda x : "0" if x == "+" else "1")
+
+    short = contacts[["strand1", "chrom1", "pos1", "frag1", "strand2", "chrom2", "pos2", "frag2"]]
+    
+    short.to_csv(short_path, header=False, index=False, sep="\t")
+
+
+def get_contact_stats(out_prefix):
+    
+    pairtools_contacts = f"{out_prefix}_contacts.dedup.pairs.gz"
+    pairtools_chimeras = f"{out_prefix}_chimeras.dedup.pairs.gz"
+
+    contact_stats = {
+        "total_contacts" : 0,
+        "contacts_dup_rate" : 0,
+        "intra1kb_contacts" : 0,
+        "intra10kb_contacts" : 0,
+        "intra20kb_contacts" : 0,
+        "inter_contacts" : 0,
+        "read_pairs_with_contacts" : 0,
+        "total_nonligation_contacts" : 0
+    }
+
+    contact_types = {"R1" : 0,
+             "R2" : 0,
+             "R1-2" : 0,
+             "R1-2" : 0,
+             "R1&2" : 0,
+             "RU_mask" : 0,
+             "UU_all" : 0,
+             "UU_mask" : 0,
+             "UR_mask" : 0
+             }
+
+    try:     
+        contacts = pd.read_table(pairtools_contacts, comment="#", header=None)
+        contacts.columns = pairs_columns
+    except ValueError:
+        contacts = pd.DataFrame(columns = pairs_columns)
+
+    try:     
+        chimeras = pd.read_table(pairtools_chimeras, comment="#", header=None)
+        chimeras.columns = pairs_columns
+    except ValueError:
+        chimeras = pd.DataFrame(columns = pairs_columns)
+
+    contacts["type_rule"] = contacts["pair_type"] + "_" + contacts["rule"]
+
+    df_intra = contacts[contacts["chrom1"] == contacts["chrom2"]]
+    df_intra_1kb = df_intra[(df_intra["pos2"] - df_intra["pos1"]).abs() >= 1000]
+    df_intra_10kb = df_intra[(df_intra["pos2"] - df_intra["pos1"]).abs() >= 10000]
+    df_intra_20kb = df_intra[(df_intra["pos2"] - df_intra["pos1"]).abs() >= 20000]
+    df_inter = contacts[contacts["chrom1"] != contacts["chrom2"]]
+
+
+    contact_stats["intra1kb_contacts"] = len(df_intra_1kb)
+    contact_stats["intra10kb_contacts"] = len(df_intra_10kb)
+    contact_stats["intra20kb_contacts"] = len(df_intra_20kb)
+    contact_stats["inter_contacts"] = len(df_inter)
+    contact_stats["read_pairs_with_contacts"] = len(contacts["read"].unique())
+    
+    contact_types_emp = {**dict(contacts["type_rule"].value_counts()), 
+           **dict(contacts["reads"].value_counts())}
+    for i in contact_types_emp:
+        contact_types[i] += contact_types_emp[i]
+
+    for i in contact_types:
+        contact_stats[i] = contact_types[i]
+    
+    contact_stats["total_contacts"] = len(contacts)
+
+    contact_stats["total_nonligation_contacts"] = len(chimeras)
+
+    return contact_stats
+
+
 def illegal_overlap(seg_keys):
     illegal_overlap = False
-    # If chimera, determine if sequential overlaps condition is violated
+    # If split, determine if sequential overlaps condition is violated
     if len(seg_keys) > 2:
         for i in range(len(seg_keys) - 1):
             key = seg_keys[i]
@@ -89,17 +238,52 @@ def illegal_overlap(seg_keys):
 
     return illegal_overlap
 
+def remove_illegal_overlap(seg_keys):
+    seg_keys_copy = seg_keys.copy()
+    rng.shuffle(seg_keys_copy)
+    sorted_seg_keys = sorted(seg_keys_copy, key = lambda x : (x[2], x[1] - x[0]), reverse=True) 
+
+    # This enables skipping already deleted segments
+    to_analyze = {}
+    for i in sorted_seg_keys:
+        to_analyze[i] = True
+
+    for i in range(len(sorted_seg_keys) - 1):
+        seg0 = sorted_seg_keys[i]
+        if not to_analyze[seg0]:
+            continue
+            
+        for j in range(i + 1, len(sorted_seg_keys)):
+            seg1 = sorted_seg_keys[j]
+
+            if seg0[0] >= seg1[0] and seg0[1] <= seg1[1]:
+                to_analyze[seg1] = False
+            elif seg0[0] <= seg1[0] and seg0[1] >= seg1[1]:
+                to_analyze[seg1] = False
+
+    filtered_seg_keys = []
+    removed_keys = 0
+    for i in seg_keys:
+        if to_analyze[i]:
+            filtered_seg_keys.append(i)
+        else:
+            removed_keys += 1
+
+    return filtered_seg_keys, removed_keys
+
 def contact_filter(algn1, 
                    algn2, 
                    pair_index,
                    R1_cs_keys,
-                   R2_cs_keys
+                   R2_cs_keys,
+                   min_intra_dist = 1000
                   ):
     if not algn1["is_mapped"] or not algn1["is_unique"]:
         return "na"
     if not algn2["is_mapped"] or not algn2["is_unique"]:
         return "na"
     contact_type = pair_index[1]
+    contact_class = pair_index[0]
     
     if contact_type == "R1": # Pairtools reports 5' fragment before 3' fragment
         idx5 = algn1["idx"]
@@ -117,6 +301,25 @@ def contact_filter(algn1,
             return "chimera"
         if not R2_cs_keys[cs_key]:
             return "chimera"
+    elif algn1["type"] == "R":
+        #print(R2_cs_keys)
+        #print()
+        if (0, 1) not in R2_cs_keys:
+            return "chimera"
+        if not R2_cs_keys[(0, 1)]:
+            return "chimera"
+    elif algn2["type"] == "R":
+        #print(R1_cs_keys)
+        #print()
+        if (0, 1) not in R1_cs_keys:
+            return "chimera"
+        if not R1_cs_keys[(0, 1)]:
+            return "chimera"
+
+    if algn1["chrom"] == algn2["chrom"]:
+        if np.abs(algn1["pos"] - algn2["pos"]) < min_intra_dist:
+            return "short"
+
     return "contact"
 
 def get_methylation_tags(pairs, mate, is_forward):
@@ -215,7 +418,7 @@ def softclip_pairs(pairs):
         
     return new_pairs            
 
-def create_trimmed_mate(read, original_span, adjusted_span, pairs, mate, header):
+def create_trimmed_mate(read, original_span, adjusted_span, pairs, mate, header, full_bam):
 
     if original_span == adjusted_span:
         return read, pairs
@@ -272,10 +475,11 @@ def create_trimmed_mate(read, original_span, adjusted_span, pairs, mate, header)
             tags[i] = (tag[0], new_tags[tag[0]])
 
     real_trim_5 = read_5 - original_span[0]
-    real_trim_3 = original_span[1] - read_3 + 1 
+    real_trim_3 = original_span[1] - read_3 - 1 
 
-    tags.append(("ZU", real_trim_5))
-    tags.append(("ZD", real_trim_3))
+    if full_bam:
+        tags.append(("ZU", real_trim_5))
+        tags.append(("ZD", real_trim_3))
     
     new_read = pysam.AlignedSegment(header=pysam.AlignmentHeader().from_dict(header))
     new_read.query_name = read.query_name
@@ -465,9 +669,10 @@ def adjust_split(pairs5, seg5, read5,
     return seg5, seg3, cut_site_present
     
 
-def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
+def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header, full_bam):
 
     cut_site_keys = {}
+    cut_site_labels = {}
     illegal_post_trim = 0
 
     if len(seg_keys) == 1:
@@ -475,9 +680,9 @@ def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
         existing_data["adjusted_span"] = seg_keys[0]
         existing_data["trimmed_read"] = existing_data["read"]
         existing_data["new_pairs"] = existing_data["pairs"]
-        return ordered_reads, cut_site_keys, illegal_post_trim
+        return ordered_reads, cut_site_keys, cut_site_labels, illegal_post_trim
 
-    # Chimeric read
+    # split read
     adjusted_seg_keys = seg_keys.copy()
     
     for i in range(len(adjusted_seg_keys)-1):
@@ -499,6 +704,15 @@ def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
         adjusted_seg_keys[i+1] = aseg3
         cut_site_keys[(i, i+1)] = is_cut
 
+        if i not in cut_site_labels:
+            cut_site_labels[i] = []
+        if i+1 not in cut_site_labels:
+            cut_site_labels[i+1] = []
+
+        if is_cut:
+            cut_site_labels[i].append("D")
+            cut_site_labels[i+1].append("U")
+
     all_keys = list(ordered_reads.keys())
     
     for key in all_keys:
@@ -510,7 +724,8 @@ def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
             ordered_reads[key]["adjusted_span"], 
             ordered_reads[key]["pairs"], 
             mate, 
-            header
+            header,
+            full_bam
         )
 
         if trimmed_read == None: # Read is eliminated/erroneous by trimming
@@ -520,8 +735,7 @@ def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header):
             ordered_reads[key]["trimmed_read"] = trimmed_read
             ordered_reads[key]["new_pairs"] = new_pairs
 
-    return ordered_reads, cut_site_keys, illegal_post_trim
-    
+    return ordered_reads, cut_site_keys, cut_site_labels, illegal_post_trim
 
 def get_5_cut_point(pairs, original_point, is_forward):
     # Handles issues where original cut point is not mapped
@@ -614,133 +828,6 @@ def build_cigar(read, pairs, start_index, end_index):
 
     return updated_cigartuples
 
-
-def dedup_contacts(dup_contacts_path, chimeras_path, dedup_contacts_path, save_raw = True):
-    columns = ["read", 
-               "chrom1", "pos1", "chrom2", 
-               "pos2", "strand1", "strand2", 
-               "contact_type", "pair_index", "pair_type"]
-
-    contact_stats = {
-        "total_contacts" : 0,
-        "contacts_dup_rate" : 0,
-        "intra1kb_contacts" : 0,
-        "intra10kb_contacts" : 0,
-        "inter_contacts" : 0,
-        "read_pairs_with_contacts" : 0
-    }
-
-    contact_types = {"R1" : 0,
-                 "R2" : 0,
-                 "R1-2" : 0,
-                 "R1-2" : 0,
-                 "R1&2" : 0,
-                 "RU_mask" : 0,
-                 "UU_all" : 0,
-                 "UU_mask" : 0,
-                 "UR_mask" : 0
-                 }
-
-    try:
-        df = pd.read_table(dup_contacts_path, header=None)
-        df.columns = columns
-    except ValueError:
-        df = pd.DataFrame(columns=columns)
-        
-    df_dedup = df.drop_duplicates(["chrom1", "pos1", 
-                                   "chrom2", "pos2", 
-                                   "strand1", "strand2"])
-
-    df_intra = df_dedup[df_dedup["chrom1"] == df_dedup["chrom2"]]
-    df_intra_1kb = df_intra[(df_intra["pos2"] - df_intra["pos1"]).abs() >= 1000]
-    df_intra_10kb = df_intra[(df_intra["pos2"] - df_intra["pos1"]).abs() >= 10000]
-
-    df_inter = df_dedup[df_dedup["chrom1"] != df_dedup["chrom2"]]
-
-    if len(df) > 0:
-        contact_stats["contacts_dup_rate"] = dedup_rate = 1 - (len(df_dedup) / len(df))
-    else:
-        contact_stats["contacts_dup_rate"] = np.nan
-
-    contact_stats["intra1kb_contacts"] = len(df_intra_1kb)
-    contact_stats["intra10kb_contacts"] = len(df_intra_10kb)
-    contact_stats["inter_contacts"] = len(df_inter)
-    
-    report_contacts = pd.concat([df_intra_1kb, df_inter])
-
-    contact_stats["read_pairs_with_contacts"] = len(report_contacts["read"].unique())
-    
-    contact_types_emp = {**dict(report_contacts["contact_type"].value_counts()), 
-           **dict(report_contacts["pair_type"].value_counts())}
-    for i in contact_types_emp:
-        contact_types[i] += contact_types_emp[i]
-
-    contact_stats["total_contacts"] = len(report_contacts)
-
-    report_contacts.to_csv(dedup_contacts_path, header=False, index=False, sep="\t")
-    
-    if not save_raw:
-        subprocess.run(shlex.split(f'rm -f {dup_contacts_path}'), check=True)
-
-    contact_stats.update(contact_types)
-
-    try:
-        chimeras = pd.read_table(chimeras_path, header=None)
-        chimeras.columns = columns
-    except ValueError:
-        chimeras = pd.DataFrame(columns=columns)
-        
-    chimeras_dedup = chimeras.drop_duplicates(["chrom1", "pos1", 
-                                   "chrom2", "pos2", 
-                                   "strand1", "strand2"])
-
-    contact_stats["non_ligation_contacts"] = len(chimeras_dedup)
-
-    return contact_stats
-
-def make_short(contacts_path, short_path, chrom_sizes):
-
-    chrom_order = {}
-    index = 0
-    with open(chrom_sizes) as c_in:
-        for line in c_in:
-            line = line.strip().split()
-            chrom = line[0]
-            chrom_order[chrom] = index
-            index += 1
-
-    with gzip.open(contacts_path, 'rt') as contacts_in, \
-        gzip.open(short_path, 'wt') as short_out:
-
-        for line in contacts_in:
-            line = line.strip().split("\t")
-            
-            chrom1 = line[1]
-            pos1 = line[2]
-            chrom2 = line[3]
-            pos2 = line[4]
-            
-            strand1 = line[5]
-            strand1 = "0" if strand1 == "+" else "1"
-            
-            strand2 = line[6]
-            strand2 = "0" if strand2 == "+" else "1"
-
-            if chrom1 == chrom2:
-                if int(pos1) > int(pos2):
-                    short_contact = [strand2, chrom2, pos2, "0", strand1, chrom1, pos1, "1"]
-                else:
-                    short_contact = [strand1, chrom1, pos1, "0", strand2, chrom2, pos2, "1"]
-            elif chrom_order[chrom1] > chrom_order[chrom2]:
-                short_contact = [strand2, chrom2, pos2, "0", strand1, chrom1, pos1, "1"]
-            else:
-                short_contact = [strand1, chrom1, pos1, "0", strand2, chrom2, pos2, "1"]
-
-            short_contact = "\t".join(short_contact) + "\n"
-
-            short_out.write(short_contact)
-            
-
 def compute_genome_coverage(bam, min_mapq, min_base_quality, keep_dup=False):
     # Compute genome coverage
 
@@ -770,13 +857,14 @@ def compute_mapped_nucleotides(bam, min_mapq, min_base_quality, keep_dup=False):
     out = p2.stdout.strip()
     mapped_read_bases = int(out)
     return mapped_read_bases
-
-def parse_stats(cell, 
-                out_prefix, 
-                min_mapq = 30, 
-                min_base_quality = 20):
     
-    trim_stats = out_prefix + "_trim_stats.txt"
+def aggregate_qc_stats(cell, 
+                       out_prefix, 
+                       min_mapq = 30, 
+                       min_base_quality = 20):
+
+    # Trimming stats
+    trim_stats = f"{out_prefix}_trim_stats.txt"
     with open(trim_stats) as f:
         line_count = 0
         for line in f:
@@ -795,9 +883,11 @@ def parse_stats(cell,
                                          "trimmed_R2_mates" : out_r2
                                         }, orient="index").T
 
+    # Contamination stats
     contam_stats = f"{out_prefix}_contam_stats.txt"
     contam_df = pd.read_table(contam_stats).astype(float)
 
+    # Alignment duplicates stats
     dup_stats = f"{out_prefix}_dupsifter_stats.txt"
     dup_count = 0
     with open(dup_stats) as f:
@@ -817,16 +907,24 @@ def parse_stats(cell,
         "duplicate_mates" : dup_count,
         "alignment_dup_rate" : dup_rate
     }, orient="index").T
-                
 
-    alignment_stats = f"{out_prefix}_contacts_trim_stats.txt"
+
+    # Post-trimming alignment and contacts stats
+
+    alignment_stats = f"{out_prefix}_alignment_stats.txt"
     alignment_df = pd.read_table(alignment_stats)
 
+    # ALLC stats
+    
     methylation_stats = out_prefix + ".allc.tsv.gz_methylation_stats.txt"
     methylation_df = pd.read_table(methylation_stats)
 
+    # Cell information
+    
     cell_df = pd.DataFrame([cell], columns=["cell"])
 
+    # Coverage stats
+    
     trimmed_bam = f"{out_prefix}_trimmed_sorted.bam"
     mkdup_bam = f"{out_prefix}_mkdup_sorted.bam"
     masked_bam = f"{out_prefix}_masked_sorted.bam"
@@ -861,7 +959,9 @@ def parse_stats(cell,
                                       ]
                              )
 
-    all_stats = pd.concat([cell_df, trim_df, contam_df, dedup_df, alignment_df, cov_map_df, methylation_df], axis=1)
+    # Aggregate
+    all_stats = pd.concat([cell_df, trim_df, contam_df, dedup_df, 
+                           alignment_df, cov_map_df, methylation_df], axis=1)
 
     all_stats = all_stats.T
 

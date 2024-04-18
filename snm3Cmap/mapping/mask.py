@@ -105,6 +105,9 @@ class OverlapMask:
         return ordered_reads
     
     def process_read_group(self, read_group, read_group_name, bam_out):
+
+        if read_group == None:
+            return
         r1 = []
         
         r2 = []
@@ -134,6 +137,8 @@ class OverlapMask:
     def process_bam(self):
 
         iter_count = 0
+        read_group = None
+        read_group_name = None
         with pysam.AlignmentFile(self.trimmed_bam, index_filename=None) as bam_in:
             with pysam.AlignmentFile(self.masked_bam, 'wb', template=bam_in) as bam_out:
                                 

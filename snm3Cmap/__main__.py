@@ -131,6 +131,14 @@ def prepare_mapping_register_subparser(subparser):
                               convert otherwise linear alignments into walks, and affect how they get reported 
                               as a Hi-C pair (Pairtools parameter)""")
 
+    parser_opt.add_argument('--full-bam', action="store_true",
+                        help="""If set, output BAM files have 4 extra tags. ZU and ZD report the number of basepairs 
+                                trimmed off of the 5' and 3' end of the alignment, respectively. ZL reports if an alignment 
+                                was determined to have a cut site at the 5' end (U), 3' end (D), both (B), or neither (N)""")
+
+    parser_opt.add_argument('--min-intra-dist', type=int, default=1000,
+                        help='Minimum distance for intrachromosomal contacts')
+
 def contamination_filter_register_subparser(subparser):
     parser = subparser.add_parser('contamination-filter',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -180,6 +188,18 @@ def call_contacts_register_subparser(subparser):
                               specified value are treated as “null” alignments. These null alignments 
                               convert otherwise linear alignments into walks, and affect how they get reported 
                               as a Hi-C pair (Pairtools parameter)""")
+
+    parser_opt.add_argument('--full-bam', action="store_true",
+                            help="""If set, output BAM files have 4 extra tags for split alignments. ZU and ZD report the 
+                                    number of basepairs trimmed off of the 5' and 3' end of the alignment, respectively. 
+                                    ZL reports if an alignment was determined to have a cut site at the 5' end (U), 3' 
+                                    end (D), both (B), or neither (N)""")
+    
+    parser_opt.add_argument('--min-intra-dist', type=int, default=1000,
+                        help='Minimum distance for intrachromosomal contacts')
+    
+    parser_opt.add_argument('--threads', type=int, default=1,
+                        help='Threads for Pairtools (Pairtools parameter)')
 
 
 def mask_overlaps_register_subparser(subparser):
@@ -241,8 +261,11 @@ def bam_to_allc_register_subparser(subparser):
 def aggregate_qc_stats_register_subparser(subparser):
     parser = subparser.add_parser('aggregate-qc-stats',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                                  help="Aggregate QC stats generated during trimming, filtering, mapping, and contact/methylation calling")
-
+                                  help="""
+                                        Aggregate QC stats generated during trimming, filtering, mapping, and contact/methylation calling, 
+                                        as well as generate a .short file for contacts.
+                                        """
+                                 )
     # Required arguments
     parser_req = parser.add_argument_group("required arguments")
     
@@ -320,7 +343,7 @@ def main():
     elif cur_command in ['bam-to-allc']:
         from .mapping import bam_to_allc as func
     elif cur_command in ['aggregate-qc-stats']:
-        from .mapping import parse_stats as func
+        from .mapping import aggregate_qc_stats as func
     else:
         log.debug(f'{cur_command} is not an valid sub-command')
         parser.parse_args(["-h"])

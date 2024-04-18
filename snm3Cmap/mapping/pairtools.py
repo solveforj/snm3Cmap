@@ -797,8 +797,10 @@ def write_pairsam(
         str(algn2["pos"]),
         algn1["strand"],
         algn2["strand"],
-        algn1["type"] + algn2["type"] + "_" + rule,
-        str(pair_index[0]),
+        algn1["type"] + algn2["type"],
+        rule,
+        #algn1["type"] + algn2["type"] + "_" + rule,
+        #str(pair_index[0]),
         pair_index[1]
     ]
 
