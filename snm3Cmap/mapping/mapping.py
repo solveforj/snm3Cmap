@@ -3,22 +3,18 @@ from glob import glob
 import os
 import yaml
 
-def prepare_mapping(plate_info,
-                    demultiplex_directory, 
-                    barcodes,
-                    reference_genome,
-                    chrom_sizes,
-                    min_mapq=30,
-                    max_molecule_size=750,
-                    max_inter_align_gap=20,
-                    min_base_quality=20,
+def prepare_mapping(config,
                     jobs=2,
                     nolock=False,
                     rerun_incomplete=False,
-                    full_bam=False,
-                    min_intra_dist=1000
                    ):
 
+    with open(config) as f:
+        config_dict = yaml.safe_load(f)
+
+    barcodes = config_dict["setup"]["barcodes"]
+    demultiplex_directory = config_dict["setup"]["demultiplex_directory"]
+    plate_info = config_dict["setup"]["plate_info"]
     smk_path = 'mapping.Snakefile'
     
     with Path(__file__).with_name(smk_path).open('r') as f:
@@ -32,19 +28,10 @@ def prepare_mapping(plate_info,
                 cell_ids.append(line[1:])
 
     biscuit_threads = jobs // 2 if jobs > 1 else 1
-
-    full_bam = "--full-bam" if full_bam else ""
     
     params = {
         "biscuit_threads" : f'{biscuit_threads}',
-        "reference_path" : f'"{reference_genome}"',
-        "chrom_sizes" : f'"{chrom_sizes}"',
-        "min_mapq" : f'{min_mapq}',
-        "max_molecule_size" : f'{max_molecule_size}',
-        "max_inter_align_gap" : f'{max_inter_align_gap}',
-        "min_base_quality" : f'{min_base_quality}',
-        "full_bam" : f'"{full_bam}"',
-        "min_intra_dist" : f'{min_intra_dist}'
+        "parameters_path" : f'"{config}"',
     }
 
     nolock = "--nolock" if nolock else ""

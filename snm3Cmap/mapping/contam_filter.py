@@ -45,7 +45,7 @@ class ContaminationFilter:
                 read_name = read.query_name
                 mate = read_name.split("_")[-1]
                 
-                if read.mapping_quality < self.mapq_threshold:
+                if read.mapping_quality < self.min_mapq:
                       
                     # Do not count unmethylated/methylated sites for read with low MAPQ
                     r_m, r_um = 0, 0
@@ -100,10 +100,10 @@ class ContaminationFilter:
                     self.r2_removed += 1          
 
     
-    def __init__(self, bam, mapq_threshold, out_prefix):
+    def __init__(self, bam, min_mapq, out_prefix):
 
         self.bam = bam
-        self.mapq_threshold = mapq_threshold
+        self.min_mapq = min_mapq
         self.out_prefix = out_prefix
 
         self.out = f"{out_prefix}_contam_filtered.bam"

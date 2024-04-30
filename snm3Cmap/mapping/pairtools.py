@@ -60,10 +60,12 @@ def parse_read(read,
 
     mate = read.query_name.split("_")[-1]
     flag = read.flag
+    
     is_unique = read.mapping_quality >= min_mapq
     is_mapped = (flag & 0x04) == 0
     is_linear = not read.has_tag("SA")
     cigar = cigar_dict(cigartuples, cigarstring)
+    
     if is_mapped:
         if (flag & 0x10) == 0:
             strand = "+"
@@ -113,6 +115,7 @@ def parse_read(read,
         "span":span,
         "mate":mate,
         "idx": idx,
+        "read" : read,
         "reference_start": read.reference_start,
         "reference_end": read.reference_end
     }
@@ -687,6 +690,7 @@ def _convert_gaps_into_alignments(sorted_algns, max_inter_align_gap=20):
             new_algn["algn_read_span"] = algn["dist_to_5"] - last_5_pos
             new_algn["read_len"] = algn["read_len"]
             new_algn["dist_to_3"] = new_algn["read_len"] - algn["dist_to_5"]
+            new_algn["gap"] = True # CHANGE
 
             last_5_pos = algn["dist_to_5"] + algn["algn_read_span"]
 
@@ -773,22 +777,18 @@ def rescue_walk(algns1, algns2, max_molecule_size):
     else:
         return None
 
-def write_pairsam(
+def write_pairs(
     algn1,
     algn2,
     readID,
     pair_index,
     rule,
+    contact_class,
+    overlap,
+    cs_locs,
     out_file
 ):
-    """
-    Write output pairsam.
-    Note: SAM is already tab-separated and
-    any printable character between ! and ~ may appear in the PHRED field!
-    (http://www.ascii-code.com/)
-    Thus, use the vertical tab character to separate fields!
-    """
-
+    
     cols = [
         readID,
         algn1["chrom"],
@@ -799,14 +799,15 @@ def write_pairsam(
         algn2["strand"],
         algn1["type"] + algn2["type"],
         rule,
-        #algn1["type"] + algn2["type"] + "_" + rule,
-        #str(pair_index[0]),
-        pair_index[1]
+        pair_index[1],
+        contact_class,
+        str(overlap),
+        ",".join(cs_locs)
     ]
 
     out_file.write("\t".join(cols) + "\n")
 
-def contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap=20):
+def contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap=None):
 
     R1_parsed = []
     for i in R1:
@@ -814,7 +815,7 @@ def contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap
         read = read_data["trimmed_read"]
         span = read_data["adjusted_span"]
         R1_parsed.append(parse_read(read, span, i, min_mapq))
-
+    
     R2_parsed = []
     for i in R2:
         read_data = R2[i]
@@ -830,10 +831,11 @@ def contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap
         R2_parsed = sorted(R2_parsed, key=lambda algn: algn["dist_to_5"])
     else:
         R2_parsed = [empty_alignment()]  # Empty alignment dummy
-
-    _convert_gaps_into_alignments(R1_parsed, max_inter_align_gap)
-    _convert_gaps_into_alignments(R2_parsed, max_inter_align_gap)
-
+        
+    if max_inter_align_gap is not None:
+        _convert_gaps_into_alignments(R1_parsed, max_inter_align_gap)
+        _convert_gaps_into_alignments(R2_parsed, max_inter_align_gap)
+    
     hic_algn1 = R1_parsed[0]
     hic_algn2 = R2_parsed[0]
     pair_index = (1, "R1-2")
@@ -848,10 +850,13 @@ def contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap
     if is_chimeric_1 or is_chimeric_2:
 
         rescued_linear_side = rescue_walk(R1_parsed, R2_parsed, max_molecule_size)
-    
         # Walk was rescued as a simple walk:
-        if rescued_linear_side is not None:
-            pair_index = (1, "R1" if rescued_linear_side == 1 else "R2")
+        if rescued_linear_side == 1 and "gap" not in hic_algn1:
+            pair_index = (1, "R1")
+            output_iter = iter([(hic_algn1, hic_algn2, pair_index)])
+        elif rescued_linear_side == 2 and "gap" not in hic_algn2:
+            pair_index = (1, "R2")
+            output_iter = iter([(hic_algn1, hic_algn2, pair_index)])
         # Walk is unrescuable:
         else:
             rule = "all"

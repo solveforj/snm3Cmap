@@ -57,15 +57,8 @@ def prepare_demultiplex_register_subparser(subparser):
     
     parser_req = parser.add_argument_group("required arguments")
     
-    parser_req.add_argument('--plate-info', type=str, default=None, required=True,
-                            help="""Path to tab-separated file with one line for each plate. 
-                                    The first column has the path to the raw fastq files for a plate.
-                                    The second column has the identifier for a plate.
-                                """)
-    parser_req.add_argument('--output-directory', type=str, default=None, required=True,
-                        help='Directory for output fastq files')
-    parser_req.add_argument('--barcodes', type=str, default=None, required=True,
-                        help='Path to barcodes fasta')
+    parser_req.add_argument('--config', type=str, default=None, required=True,
+                        help='Path to config YML file')
 
     parser_opt = parser.add_argument_group("optional arguments")
     
@@ -86,58 +79,21 @@ def prepare_mapping_register_subparser(subparser):
 
     # Required arguments
     parser_req = parser.add_argument_group("required arguments")
-    
-    parser_req.add_argument('--plate-info', type=str, default=None, required=True,
-                            help='Path to plate ids in text file')
-                            
-    parser_req.add_argument('--demultiplex-directory', type=str, default=None, required=True,
-                            help='Path to demultiplexed plates directory')
-                            
-    parser_req.add_argument('--barcodes', type=str, default=None, required=True,
-                            help='Path to barcodes fasta')
 
-    parser_req.add_argument('--reference-genome', type=str, default=None, required=True,
-                            help='Path to indexed reference genome')
-
-    parser_req.add_argument('--chrom-sizes', type=str, default=None, required=True,
-                            help='Path to chromosome sizes file')
+    parser_req.add_argument('--config', type=str, default=None, required=True,
+                        help='Path to config YML file')
 
     parser_opt = parser.add_argument_group("optional arguments")
-
+    
     parser_opt.add_argument('--jobs', type=int, default=2,
                         help='If set, Snakemake is run with this many concurrent processes')
     
-    parser_opt.add_argument('--nolock', action="store_true",
+    parser_opt.add_argument('--nolock', action="store_true", 
                             help='If set, Snakemake is run with --nolock (working directory will not be locked)')
     
     parser_opt.add_argument('--rerun-incomplete', action="store_true",
                             help="""If set, Snakemake is run with --rerun-incomplete 
                                     (re-run all jobs the output of which is recognized as incomplete)""")
-
-    parser_opt.add_argument('--min-mapq', type=int, default=30,
-                        help='Minimum MAPQ to consider alignment (Pairtools parameter)')
-
-    parser_opt.add_argument('--min-base-quality', type=int, default=20,
-                        help='Minimum base quality for including aligned nucleotides')
-
-    parser_opt.add_argument('--max-molecule-size', type=int, default=750,
-                        help="""The maximal size of a Hi-C molecule; used to rescue single ligations 
-                                (from molecules with three alignments) and to rescue complex ligations.
-                                Used for walks-policy mask, not walks-policy all (Pairtools parameter)""")
-    
-    parser_opt.add_argument('--max-inter-align-gap', type=int, default=20,
-                      help="""Read segments that are not covered by any alignment and longer than the 
-                              specified value are treated as “null” alignments. These null alignments 
-                              convert otherwise linear alignments into walks, and affect how they get reported 
-                              as a Hi-C pair (Pairtools parameter)""")
-
-    parser_opt.add_argument('--full-bam', action="store_true",
-                        help="""If set, output BAM files have 4 extra tags. ZU and ZD report the number of basepairs 
-                                trimmed off of the 5' and 3' end of the alignment, respectively. ZL reports if an alignment 
-                                was determined to have a cut site at the 5' end (U), 3' end (D), both (B), or neither (N)""")
-
-    parser_opt.add_argument('--min-intra-dist', type=int, default=1000,
-                        help='Minimum distance for intrachromosomal contacts')
 
 def contamination_filter_register_subparser(subparser):
     parser = subparser.add_parser('contamination-filter',
@@ -150,7 +106,7 @@ def contamination_filter_register_subparser(subparser):
     parser_req.add_argument('--bam', type=str, default=None, required=True,
                             help='Path to input bam')
                             
-    parser_req.add_argument('--mapq-threshold', type=int, default=30, required=True,
+    parser_req.add_argument('--min-mapq', type=int, default=30, required=True,
                             help="MAPQ threshold for considering a read's CH methylation")
                             
     parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
@@ -159,7 +115,7 @@ def contamination_filter_register_subparser(subparser):
 def call_contacts_register_subparser(subparser):
     parser = subparser.add_parser('call-contacts',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                                  help="Call contacts from BAM file and trim chimeric alignments to remove within-mate overlaps")
+                                  help="Call contacts from BAM file and trim split alignments to remove within-mate overlaps")
 
     # Required arguments
     parser_req = parser.add_argument_group("required arguments")
@@ -173,6 +129,9 @@ def call_contacts_register_subparser(subparser):
     parser_req.add_argument('--chrom-sizes', type=str, default=None, required=True,
                             help='Path to chromosome sizes file')
 
+    parser_req.add_argument('--restriction-sites', type=str, nargs="+", default=[], required=True,
+                            help='Paths to restriction sites files')
+
     parser_opt = parser.add_argument_group("optional arguments")
     
     parser_opt.add_argument('--min-mapq', type=int, default=30,
@@ -189,18 +148,23 @@ def call_contacts_register_subparser(subparser):
                               convert otherwise linear alignments into walks, and affect how they get reported 
                               as a Hi-C pair (Pairtools parameter)""")
 
-    parser_opt.add_argument('--full-bam', action="store_true",
+    parser_opt.add_argument('--trim-reporting', type=str, default="minimal", choices=['minimal', 'full'],
                             help="""If set, output BAM files have 4 extra tags for split alignments. ZU and ZD report the 
                                     number of basepairs trimmed off of the 5' and 3' end of the alignment, respectively. 
                                     ZL reports if an alignment was determined to have a cut site at the 5' end (U), 3' 
                                     end (D), both (B), or neither (N)""")
     
     parser_opt.add_argument('--min-intra-dist', type=int, default=1000,
-                        help='Minimum distance for intrachromosomal contacts')
-    
-    parser_opt.add_argument('--threads', type=int, default=1,
-                        help='Threads for Pairtools (Pairtools parameter)')
+                            help='Minimum distance for intrachromosomal contacts')
 
+    parser_opt.add_argument('--read-type', type=str, default="bisulfite", choices=['bisulfite', 'wgs'],
+                            help='Indicates that reads were bisulfite converted or not bisulfite converted (wgs)')
+
+    parser_opt.add_argument('--max-cut-site-split-algn-dist', type=int, default = 20,
+                            help="""Max allowed distance (bp) from nearest cut site to split alignment to be considered ligation event""")
+
+    parser_opt.add_argument('--max-cut-site-whole-algn-dist', type=int, default = 20,
+                            help="""Max allowed distance (bp) from nearest cut site to whole alignment to be considered ligation event""")
 
 def mask_overlaps_register_subparser(subparser):
     parser = subparser.add_parser('mask-overlaps',
@@ -258,6 +222,32 @@ def bam_to_allc_register_subparser(subparser):
     parser_opt.add_argument('--save-count-df', action="store_true",
                             help='If set, save context count summary file')
 
+def pairtools_stats_register_subparser(subparser):
+    parser = subparser.add_parser('pairtools-stats',
+                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+                                  help="""
+                                        Compute stats for pairs files for contacts and non-ligation chimeras 
+                                        """
+                                 )
+    # Required arguments
+    parser_req = parser.add_argument_group("required arguments")
+
+    parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
+                        help='Path including name prefix for output stats file')
+
+    parser_req.add_argument('--contacts', type=str, default=None, required=True,
+                            help='Path to contacts pairs file')
+    
+    parser_req.add_argument('--chimeras', type=str, default=None, required=True,
+                            help='Path to non-ligation chimeras pairs file')
+
+    parser_req.add_argument('--contacts-stats', type=str, default=None, required=True,
+                            help='Path to pairtools dedup stats for contacts pairs file')
+
+    parser_req.add_argument('--chimeras-stats', type=str, default=None, required=True,
+                            help='Path to pairtools dedup stats for non-ligation-chimeras pairs file')
+                            
+    
 def aggregate_qc_stats_register_subparser(subparser):
     parser = subparser.add_parser('aggregate-qc-stats',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -338,6 +328,8 @@ def main():
         from .mapping import ContaminationFilter as func
     elif cur_command in ['call-contacts']:
         from .mapping import ContactGenerator as func
+    elif cur_command in ['pairtools-stats']:
+        from .mapping import pairtools_stats as func
     elif cur_command in ['mask-overlaps']:
         from .mapping import OverlapMask as func
     elif cur_command in ['bam-to-allc']:

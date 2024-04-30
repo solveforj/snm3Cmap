@@ -5,35 +5,17 @@ import numpy as np
 import subprocess
 import shlex
 import gzip
+import bisect
+import os
+from collections import OrderedDict
 
 rng = np.random.default_rng(1)
 
 pairs_columns = ["read", 
-           "chrom1", "pos1", "chrom2", 
-           "pos2", "strand1", "strand2", 
-           "pair_type", "rule", "reads"]
-
-# R1 is G to A mutated in unmethylated C
-R1_CUT_SITES = [
-    'CATG',  # NlaIII
-    'CATA',  # NlaIII
-    'GATC',  # DpnII or MboI
-    'AATC'  # DpnII or MboI
-]
-
-r1_cut = re.compile("(" + "|".join(R1_CUT_SITES) + ")")
-
-# R2 is C to T mutated in unmethylated C
-R2_CUT_SITES = [
-    'CATG',  # NlaIII
-    'TATG',  # NlaIII
-    'GATC',  # DpnII or MboI
-    'GATT'  # DpnII or MboI
-]
-
-r2_cut = re.compile("(" + "|".join(R2_CUT_SITES) + ")")
-
-ref_cut = re.compile("(GATC|CATG)")
+                 "chrom1", "pos1", "chrom2", 
+                 "pos2", "strand1", "strand2", 
+                 "pair_type", "rule", "reads", 
+                 "contact_class", "overlap", "cut_site_locs"]
 
 def process_chrom_sizes(chrom_sizes_file):
     chrom_sizes = {}
@@ -50,45 +32,7 @@ def initialize_pairs_file(handle, chrom_sizes):
     handle.write("## pairs format v1.0\n")
     for chrom in chrom_sizes:
         handle.write(f'#chromsize: {chrom} {str(chrom_sizes[chrom])}\n')
-    handle.write("#columns: readID chrom1 pos1 chrom2 pos2 strand1 strand2 pair_type rule reads\n")
-
-def process_pairs(out_prefix, 
-                  chrom_sizes,
-                  pair_class="contacts", 
-                  raw_pair_count=0, 
-                  threads=1):
-
-    pairs_dup_rate = np.nan
-    raw_pairs = f"{out_prefix}_{pair_class}.pairs.gz"
-    flip_pairs = f"{out_prefix}_{pair_class}.flip.pairs.gz"
-    sort_pairs = f"{out_prefix}_{pair_class}.sort.pairs.gz"
-    dedup_pairs = f"{out_prefix}_{pair_class}.dedup.pairs.gz"
-    stats = f"{out_prefix}_{pair_class}_dedup_stats.txt"
-    
-    if raw_pair_count == 0:
-        subprocess.run(shlex.split(f'cp {raw_pairs} {dedup_pairs}'), check=True)
-        subprocess.run(shlex.split(f'rm -f {raw_pairs}'), check=True)
-        return pairs_dup_rate
-
-    flip_cmd = f"pairtools flip --chroms-path {chrom_sizes} --output {flip_pairs} {raw_pairs}"
-    sort_cmd = f"pairtools sort --output {sort_pairs} --nproc {threads} {flip_pairs}"
-    dedup_cmd = f"pairtools dedup -p {threads} --output {dedup_pairs} --output-stats {stats} {sort_pairs}"
-
-    subprocess.run(shlex.split(flip_cmd), check=True)
-    subprocess.run(shlex.split(sort_cmd), check=True)
-    subprocess.run(shlex.split(dedup_cmd), check=True)
-
-    with open(stats) as f:
-        for line in f:
-            if "summary/frac_dups" in line:
-                try:
-                    pairs_dup_rate = float(line.strip().split()[1])
-                except ValueError:
-                    pairs_dup_rate = np.nan
-
-    subprocess.run(shlex.split(f'rm -f {raw_pairs} {flip_pairs} {sort_pairs} {stats}'), check=True)
-
-    return pairs_dup_rate
+    handle.write("#columns: readID chrom1 pos1 chrom2 pos2 strand1 strand2 pair_type rule reads contact_class overlap cut_site_locs\n")
 
 def make_short(out_prefix):
     
@@ -109,45 +53,67 @@ def make_short(out_prefix):
     
     short.to_csv(short_path, header=False, index=False, sep="\t")
 
+def process_restriction_sites(restriction_sites):
 
-def get_contact_stats(out_prefix):
-    
-    pairtools_contacts = f"{out_prefix}_contacts.dedup.pairs.gz"
-    pairtools_chimeras = f"{out_prefix}_chimeras.dedup.pairs.gz"
+    restriction_sites_dict = {}
+
+    for file in restriction_sites:
+        enzyme = os.path.basename(file).split("_")[1].split(".txt")[0]
+        restriction_sites_dict[enzyme] = {}
+        with open(file) as f:
+            for line in f:
+                line = line.strip().split()
+                chrom = line[0]
+                sites = [int(i) for i in line[1:]]
+                if chrom not in restriction_sites_dict[enzyme]:
+                    restriction_sites_dict[enzyme][chrom] = sites
+                else:
+                    restriction_sites_dict[enzyme][chrom] += sites
+
+    return restriction_sites_dict
+
+def compute_pair_stats(pair_file, pair_dup_stats):
 
     contact_stats = {
-        "total_contacts" : 0,
-        "contacts_dup_rate" : 0,
-        "intra1kb_contacts" : 0,
-        "intra10kb_contacts" : 0,
-        "intra20kb_contacts" : 0,
-        "inter_contacts" : 0,
-        "read_pairs_with_contacts" : 0,
-        "total_nonligation_contacts" : 0
+        "total" : 0,
+        "dup_rate" : 0,
+        "intra1kb" : 0,
+        "intra10kb" : 0,
+        "intra20kb" : 0,
+        "inter" : 0,
+        "represented_read_pairs" : 0
     }
 
     contact_types = {"R1" : 0,
-             "R2" : 0,
-             "R1-2" : 0,
-             "R1-2" : 0,
-             "R1&2" : 0,
-             "RU_mask" : 0,
-             "UU_all" : 0,
-             "UU_mask" : 0,
-             "UR_mask" : 0
+                     "R2" : 0,
+                     "R1-2" : 0,
+                     "R1-2" : 0,
+                     "R1&2" : 0,
+                     "RU_mask" : 0,
+                     "UU_all" : 0,
+                     "UU_mask" : 0,
+                     "UR_mask" : 0
              }
 
     try:     
-        contacts = pd.read_table(pairtools_contacts, comment="#", header=None)
+        contacts = pd.read_table(pair_file, comment="#", header=None)
         contacts.columns = pairs_columns
     except ValueError:
         contacts = pd.DataFrame(columns = pairs_columns)
 
-    try:     
-        chimeras = pd.read_table(pairtools_chimeras, comment="#", header=None)
-        chimeras.columns = pairs_columns
-    except ValueError:
-        chimeras = pd.DataFrame(columns = pairs_columns)
+    with open(pair_dup_stats) as f:
+        pairs_dup_rate = None
+        for line in f:
+            if "summary/frac_dups" in line:
+                try:
+                    pairs_dup_rate = float(line.strip().split()[1])
+                except ValueError:
+                    pairs_dup_rate = np.nan
+                break
+        # handles empty file case
+        if pairs_dup_rate == None:
+            pairs_dup_rate = np.nan
+                    
 
     contacts["type_rule"] = contacts["pair_type"] + "_" + contacts["rule"]
 
@@ -157,12 +123,11 @@ def get_contact_stats(out_prefix):
     df_intra_20kb = df_intra[(df_intra["pos2"] - df_intra["pos1"]).abs() >= 20000]
     df_inter = contacts[contacts["chrom1"] != contacts["chrom2"]]
 
-
-    contact_stats["intra1kb_contacts"] = len(df_intra_1kb)
-    contact_stats["intra10kb_contacts"] = len(df_intra_10kb)
-    contact_stats["intra20kb_contacts"] = len(df_intra_20kb)
-    contact_stats["inter_contacts"] = len(df_inter)
-    contact_stats["read_pairs_with_contacts"] = len(contacts["read"].unique())
+    contact_stats["intra1kb"] = len(df_intra_1kb)
+    contact_stats["intra10kb"] = len(df_intra_10kb)
+    contact_stats["intra20kb"] = len(df_intra_20kb)
+    contact_stats["inter"] = len(df_inter)
+    contact_stats["represented_read_pairs"] = len(contacts["read"].unique())
     
     contact_types_emp = {**dict(contacts["type_rule"].value_counts()), 
            **dict(contacts["reads"].value_counts())}
@@ -172,13 +137,36 @@ def get_contact_stats(out_prefix):
     for i in contact_types:
         contact_stats[i] = contact_types[i]
     
-    contact_stats["total_contacts"] = len(contacts)
+    contact_stats["total"] = len(contacts)
 
-    contact_stats["total_nonligation_contacts"] = len(chimeras)
-
+    contact_stats["dup_rate"] = pairs_dup_rate
+    
     return contact_stats
 
+def pairtools_stats(out_prefix,
+                    contacts,
+                    chimeras,
+                    contacts_stats,
+                    chimeras_stats
+                   ):
 
+    stats_path = f"{out_prefix}_pairtools_stats.txt"
+    
+    contacts_stats = compute_pair_stats(contacts, contacts_stats)
+
+    chimeras_stats = compute_pair_stats(chimeras, chimeras_stats)
+
+    full_stats = {}
+
+    for i in contacts_stats:
+        full_stats["contacts_" + i] = contacts_stats[i]
+
+    for i in chimeras_stats:
+        full_stats["chimeras_" + i] = chimeras_stats[i]
+
+    stats_df = pd.DataFrame.from_dict(full_stats, orient="index").T
+    stats_df.to_csv(stats_path, index=False, sep="\t")
+                    
 def illegal_overlap(seg_keys):
     illegal_overlap = False
     # If split, determine if sequential overlaps condition is violated
@@ -271,58 +259,117 @@ def remove_illegal_overlap(seg_keys):
 
     return filtered_seg_keys, removed_keys
 
-def contact_filter(algn1, 
-                   algn2, 
-                   pair_index,
-                   R1_cs_keys,
-                   R2_cs_keys,
-                   min_intra_dist = 1000
+def classify_contact(algn1, 
+                     algn2, 
+                     pair_index,
+                     R1_trimmer,
+                     R2_trimmer,
+                     rule,
+                     restriction_sites,
+                     min_intra_dist = 1000,
+                     max_cut_site_whole_algn_dist = 500
                   ):
+
+    R1_cs_keys = R1_trimmer.cut_site_keys
+    R2_cs_keys = R2_trimmer.cut_site_keys
+
+    R1_cs_classes = R1_trimmer.cut_site_classes
+    R2_cs_classes = R2_trimmer.cut_site_classes
+
+    R1_overlap_keys = R1_trimmer.overlap_keys
+    R2_overlap_keys = R2_trimmer.overlap_keys
+    
+    overlap = "NA"
+    cs_locs = []
+    
+
     if not algn1["is_mapped"] or not algn1["is_unique"]:
-        return "na"
+        ct = "na"
+        return ct, overlap, cs_locs
     if not algn2["is_mapped"] or not algn2["is_unique"]:
-        return "na"
+        ct = "na"
+        return ct, overlap, cs_locs
+
     contact_type = pair_index[1]
     contact_class = pair_index[0]
-    
-    if contact_type == "R1": # Pairtools reports 5' fragment before 3' fragment
-        idx5 = algn1["idx"]
-        idx3 = algn2["idx"]
-        cs_key = (idx5, idx3)
-        if cs_key not in R1_cs_keys:
-            return "chimera"
-        if not R1_cs_keys[cs_key]:
-            return "chimera"
-    elif contact_type == "R2": # Pairtools reports 3' fragment before 5' fragment
-        idx5 = algn2["idx"]
-        idx3 = algn1["idx"]
-        cs_key = (idx5, idx3)
-        if cs_key not in R2_cs_keys:
-            return "chimera"
-        if not R2_cs_keys[cs_key]:
-            return "chimera"
+
+    if rule == "all":
+        # Pairtools reports 5' fragment before 3' fragment
+        if contact_type == "R1": 
+            idx5 = algn1["idx"]
+            idx3 = algn2["idx"]
+            cs_key = (idx5, idx3)
+            if cs_key not in R1_cs_classes:
+                ct = "chimera"
+            if R1_cs_classes[cs_key] == "chimera":
+                ct = "chimera"
+                overlap = R1_overlap_keys[cs_key]
+                cs_locs = R1_cs_keys[cs_key]
+            else:
+                ct = R1_cs_classes[cs_key]
+                overlap = R1_overlap_keys[cs_key]
+                cs_locs = R1_cs_keys[cs_key]
+        # Pairtools reports 3' fragment before 5' fragment
+        elif contact_type == "R2": 
+            idx5 = algn2["idx"]
+            idx3 = algn1["idx"]
+            cs_key = (idx5, idx3)
+            if cs_key not in R2_cs_classes:
+                ct = "chimera"
+            if R2_cs_classes[cs_key] == "chimera":
+                ct = "chimera"
+                overlap = R2_overlap_keys[cs_key]
+                cs_locs = R2_cs_keys[cs_key]
+            else:
+                ct = R2_cs_classes[cs_key]
+                overlap = R2_overlap_keys[cs_key]
+                cs_locs = R2_cs_keys[cs_key]
+        elif contact_type == "R1&2" or contact_type == "R1-2":
+            bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(algn1["read"], algn2["read"], 
+                                                             restriction_sites, max_cut_site_whole_algn_dist)
+            if bp_enzyme != "chimera":
+                ct = "gap"
+            else:
+                ct = "chimera"
+                
     elif algn1["type"] == "R":
-        #print(R2_cs_keys)
-        #print()
-        if (0, 1) not in R2_cs_keys:
-            return "chimera"
-        if not R2_cs_keys[(0, 1)]:
-            return "chimera"
+        if (0, 1) not in R2_cs_classes:
+            ct = "chimera"
+        if R2_cs_classes[(0, 1)] == "none":
+            ct = "chimera"
+            overlap = R2_overlap_keys[(0, 1)]
+            cs_locs = R2_cs_keys[(0, 1)]
+        else:
+            ct = R2_cs_classes[(0, 1)]
+            overlap = R2_overlap_keys[(0, 1)]
+            cs_locs = R2_cs_keys[(0, 1)]
     elif algn2["type"] == "R":
-        #print(R1_cs_keys)
-        #print()
-        if (0, 1) not in R1_cs_keys:
-            return "chimera"
-        if not R1_cs_keys[(0, 1)]:
-            return "chimera"
+        if (0, 1) not in R1_cs_classes:
+            ct = "chimera"
+        if R1_cs_classes[(0, 1)] == "none":
+            ct = "chimera"
+            overlap = R1_overlap_keys[(0, 1)]
+            cs_locs = R1_cs_keys[(0, 1)]
+        else:
+            ct = R1_cs_classes[(0, 1)]
+            overlap = R1_overlap_keys[(0, 1)]
+            cs_locs = R1_cs_keys[(0, 1)]
+
+    elif algn1["type"] == "U" and algn2["type"] == "U":
+        bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(algn1["read"], algn2["read"], 
+                                                                     restriction_sites, max_cut_site_whole_algn_dist)
+        if bp_enzyme != "chimera":
+            ct = "gap"
+        else:
+            ct = "chimera"
 
     if algn1["chrom"] == algn2["chrom"]:
         if np.abs(algn1["pos"] - algn2["pos"]) < min_intra_dist:
-            return "short"
+            ct = "short"
 
-    return "contact"
+    return ct, overlap, cs_locs
 
-def get_methylation_tags(pairs, mate, is_forward):
+def get_biscuit_tags(pairs, mate, is_forward):
 
     ZC = 0
     ZR = 0
@@ -330,7 +377,6 @@ def get_methylation_tags(pairs, mate, is_forward):
     possible_conv = 0
     
     for pair in pairs:
-        #print(pair)
         if pair["cigar"] == 0:
             if pair["ref_nuc"].islower():
                 NM += 1
@@ -362,13 +408,22 @@ def get_methylation_tags(pairs, mate, is_forward):
                         ZR += 1
         elif pair["cigar"] in [1, 2]:
             NM += 1
-        #print(ZC, ZR, NM)
     
     NM = NM - possible_conv
 
-    #print(possible_conv)
-
     return ZC, ZR, NM
+
+def get_bwa_tags(pairs):
+    NM = 0
+    
+    for pair in pairs:
+        if pair["cigar"] == 0:
+            if pair["ref_nuc"].islower():
+                NM += 1
+        elif pair["cigar"] in [1, 2]:
+            NM += 1
+
+    return NM
 
 def get_md_tag(pairs):
     MD = ""
@@ -408,7 +463,6 @@ def softclip_pairs(pairs):
                 "ref_nuc" : None,
                 "read_nuc" : None,
                 "read_qual" : None,
-                #"original_sequence_nuc" : None
             }
             new_pairs.append(new_algn)
         elif pairs[i]["cigar"] in [2]:
@@ -418,88 +472,11 @@ def softclip_pairs(pairs):
         
     return new_pairs            
 
-def create_trimmed_mate(read, original_span, adjusted_span, pairs, mate, header, full_bam):
-
-    if original_span == adjusted_span:
-        return read, pairs
-        
-    pos_5, index_5, read_5 = get_5_cut_point(pairs, adjusted_span[0], read.is_forward)
-    # Index is at end of range; subtract 1 to get actual final index
-    pos_3, index_3, read_3 = get_3_cut_point(pairs, adjusted_span[1] - 1, read.is_forward)
-
-    if read.is_forward:
-        start_index = index_5
-        end_index = index_3
-        pos = pos_5
-    else:
-        start_index = index_3
-        end_index = index_5
-        pos = pos_3
-
-    if start_index >= end_index:
-        return None, None
-    
-    new_pairs = pairs[start_index:end_index]
-    if not read.is_secondary:
-        left_pairs = softclip_pairs(pairs[:start_index])
-        right_pairs = softclip_pairs(pairs[end_index:])
-        new_pairs = left_pairs + new_pairs + right_pairs
-
-    if read.is_secondary:
-        read_seq = ""
-        read_qual = ""
-        for pair in new_pairs:
-            if pair["cigar"] in [0, 1]:
-                read_seq += pair["read_nuc"]
-                read_qual += pair["read_qual"]
-    else:
-        read_seq = read.query_sequence
-        read_qual = pysam.qualities_to_qualitystring(read.query_qualities)
-
-    cigartuples = build_cigar(read, pairs, start_index, end_index)
-    new_ZC, new_ZR, new_NM = get_methylation_tags(new_pairs, mate, read.is_forward)
-    new_MD = get_md_tag(new_pairs)
-
-    new_tags = {
-        "ZC" : new_ZC,
-        "ZR" : new_ZR,
-        "NM" : new_NM,
-        "MD" : new_MD
-    }
-
-    tags = read.get_tags()
-
-    for i in range(len(tags)):
-        tag = tags[i]
-        if tag[0] in new_tags:
-            tags[i] = (tag[0], new_tags[tag[0]])
-
-    real_trim_5 = read_5 - original_span[0]
-    real_trim_3 = original_span[1] - read_3 - 1 
-
-    if full_bam:
-        tags.append(("ZU", real_trim_5))
-        tags.append(("ZD", real_trim_3))
-    
-    new_read = pysam.AlignedSegment(header=pysam.AlignmentHeader().from_dict(header))
-    new_read.query_name = read.query_name
-    new_read.query_sequence = read_seq
-    new_read.flag = read.flag
-    new_read.reference_id = read.reference_id
-    new_read.reference_start = pos
-    new_read.mapping_quality = read.mapping_quality
-    new_read.cigar = cigartuples
-    new_read.query_qualities = pysam.qualitystring_to_array(read_qual)
-    new_read.tags = tags
-
-    return new_read, new_pairs
-
-def get_loc(read):
+def get_loc(read, original_sequence):
     cigar = read.cigartuples
     if not cigar:
         return (0, 0, read.mapping_quality)
-    #clip_5 = 0
-    #clip_3 = 0
+
     if read.is_forward:
         clip_5 = cigar[0][1] if cigar[0][0] in [4, 5] else 0
         clip_3 = cigar[-1][1] if cigar[-1][0] in [4, 5] else 0
@@ -508,7 +485,7 @@ def get_loc(read):
         clip_3 = cigar[0][1] if cigar[0][0] in [4, 5] else 0
 
     start = clip_5
-    end = read.get_tag("XL") - clip_3
+    end = len(original_sequence) - clip_3
 
     return (start, end, read.mapping_quality)
 
@@ -602,143 +579,9 @@ def overlap_reference_alignment(aligned_pairs, overlap_start, overlap_end, is_fo
 def get_cut_site_spans(site, seq):
     spans = [i.span() for i in re.finditer(site, seq)]
     return spans
-    
-def adjust_split(pairs5, seg5, read5,
-                 pairs3, seg3, read3,
-                 original_sequence, mate):
-    
-    overlap = seg5[1] - seg3[0]
-    cut_site_present = False
-    
-    if read5.mapping_quality > read3.mapping_quality:
-        r5_cover = True
-    elif read5.mapping_quality == read3.mapping_quality:
-        r5_len = len(read5.query_alignment_sequence)
-        r3_len = len(read3.query_alignment_sequence)
-        if r5_len > r3_len:
-            r5_cover = True
-        elif r5_len == r3_len:
-            r5_cover = rng.choice([True, False])
-        else:
-            r5_cover = False
-    else:
-        r5_cover = False
 
-    if 4 <= overlap  < 8 : # Valid overlap between alignments
-        r5_ref_overlap_seq = overlap_reference_alignment(pairs5, seg3[0], seg5[1], read5.is_forward)
-        r3_ref_overlap_seq = overlap_reference_alignment(pairs3, seg3[0], seg5[1], read3.is_forward)
-
-        read_overlap_seq = original_sequence[seg3[0]:seg5[1]]
-
-        # Handle insertions/deletions
-        if len(r5_ref_overlap_seq) == len(r3_ref_overlap_seq) and \
-            "-" not in r5_ref_overlap_seq and "-" not in r3_ref_overlap_seq:
-            if mate == "1":
-                read_cuts = get_cut_site_spans(r1_cut, read_overlap_seq)
-            elif mate == "2":
-                read_cuts = get_cut_site_spans(r2_cut, read_overlap_seq)
-                
-            r5_cut = get_cut_site_spans(ref_cut, r5_ref_overlap_seq)
-            r3_cut = get_cut_site_spans(ref_cut, r3_ref_overlap_seq)
-
-            # Given the multiple possibilities of cut sites that can be empirically observed,
-            # at least one must be observed. Only one can be observed in r5 and r3 reference,
-            # and it must be the same for each.
-            if len(read_cuts) > 0 and (r5_cut == r3_cut) and (len(r5_cut) == len(r3_cut) == 1):
-                
-                cut_span = r5_cut[0]
-                if r5_cover:
-                    trim_site = seg3[0] + cut_span[1]
-                else:
-                    trim_site = seg3[0] + cut_span[0]
-                    
-                cut_site_present = True
-                
-                return (seg5[0], trim_site, seg5[2]), (trim_site, seg3[1], seg3[2]), cut_site_present
-
-    # There is still overlap, but a cut site could not be detected
-    if overlap > 0:
-        #print(seg5, seg3)
-        if r5_cover:
-            trim_site = seg5[1]
-        else:
-            trim_site = seg3[0]
-        return (seg5[0], trim_site, seg5[2]), (trim_site, seg3[1], seg3[2]), cut_site_present
-
-
-    return seg5, seg3, cut_site_present
-    
-
-def trim_mate(seg_keys, original_sequence, ordered_reads, mate, header, full_bam):
-
-    cut_site_keys = {}
-    cut_site_labels = {}
-    illegal_post_trim = 0
-
-    if len(seg_keys) == 1:
-        existing_data = ordered_reads[0]
-        existing_data["adjusted_span"] = seg_keys[0]
-        existing_data["trimmed_read"] = existing_data["read"]
-        existing_data["new_pairs"] = existing_data["pairs"]
-        return ordered_reads, cut_site_keys, cut_site_labels, illegal_post_trim
-
-    # split read
-    adjusted_seg_keys = seg_keys.copy()
-    
-    for i in range(len(adjusted_seg_keys)-1):
-        seg5 = adjusted_seg_keys[i]
-        pairs5 = ordered_reads[i]["pairs"]
-        read5 = ordered_reads[i]["read"]
-        
-        seg3 = adjusted_seg_keys[i+1]
-        pairs3 = ordered_reads[i+1]["pairs"]
-        read3 = ordered_reads[i+1]["read"]
-
-        mate = ordered_reads[1]["mate"]
-
-        aseg5, aseg3, is_cut = adjust_split(pairs5, seg5, read5,
-                                            pairs3, seg3, read3,
-                                            original_sequence, mate)
-
-        adjusted_seg_keys[i] = aseg5
-        adjusted_seg_keys[i+1] = aseg3
-        cut_site_keys[(i, i+1)] = is_cut
-
-        if i not in cut_site_labels:
-            cut_site_labels[i] = []
-        if i+1 not in cut_site_labels:
-            cut_site_labels[i+1] = []
-
-        if is_cut:
-            cut_site_labels[i].append("D")
-            cut_site_labels[i+1].append("U")
-
-    all_keys = list(ordered_reads.keys())
-    
-    for key in all_keys:
-        ordered_reads[key]["adjusted_span"] = adjusted_seg_keys[key]
-        
-        trimmed_read, new_pairs = create_trimmed_mate(
-            ordered_reads[key]["read"], 
-            ordered_reads[key]["span"], 
-            ordered_reads[key]["adjusted_span"], 
-            ordered_reads[key]["pairs"], 
-            mate, 
-            header,
-            full_bam
-        )
-
-        if trimmed_read == None: # Read is eliminated/erroneous by trimming
-            del ordered_reads[key] # Delete read from dictionary 
-            illegal_post_trim += 1
-        else:
-            ordered_reads[key]["trimmed_read"] = trimmed_read
-            ordered_reads[key]["new_pairs"] = new_pairs
-
-    return ordered_reads, cut_site_keys, cut_site_labels, illegal_post_trim
-
-def get_5_cut_point(pairs, original_point, is_forward):
-    # Handles issues where original cut point is not mapped
+def get_5_adj_point(pairs, original_point, is_forward):
+    # For a given aligned segment of a read, adjust 5' end of segment in case given end is not mapped
     if is_forward:
         index_5 = 0
         iterator = range(len(pairs))
@@ -757,8 +600,8 @@ def get_5_cut_point(pairs, original_point, is_forward):
                 break
     return pos_5, index_5, read_5
 
-def get_3_cut_point(pairs, original_point, is_forward):
-    # Handles issues where original cut point is not mapped
+def get_3_adj_point(pairs, original_point, is_forward):
+    # For a given aligned segment of a read, adjust 3' end of segment in case given end is not mapped
     if is_forward:
         index_3 = 1 # Index will be at end of range
         iterator = reversed(range(len(pairs)))
@@ -780,7 +623,6 @@ def get_3_cut_point(pairs, original_point, is_forward):
 def build_cigar(read, pairs, start_index, end_index):
     full_cigar = []
 
-    #print(read)
     if not read.is_secondary:
       mask_val = 4
     else:
@@ -813,7 +655,6 @@ def build_cigar(read, pairs, start_index, end_index):
     
     updated_cigartuples = []
 
-    #print(full_cigar)
     full_cigar = [i for i in full_cigar if i != "*"]
 
     counter = 1
@@ -828,6 +669,482 @@ def build_cigar(read, pairs, start_index, end_index):
 
     return updated_cigartuples
 
+def get_ref_pos(pairs, new_pos, is_forward):
+    # Determines position of pairs where specific reference position is located
+    
+    # Handles issues where new position is not mapped
+    if is_forward:
+        index_5 = 0
+        iterator = range(len(pairs))
+        for i in iterator:
+            pair = pairs[i]
+            if pair["cigar"] == 0:
+                # Adjusted pos should be equal to the new position or closer to the 3' end
+                if pair["ref_pos"] >= new_pos: 
+                    pos_5 = pair["ref_pos"]
+                    read_5 = pair["read_pos"]
+                    index_5 += i
+                    break
+    else:
+        index_5 = 1 # Index will be at end of range
+        iterator = reversed(range(len(pairs)))
+        for i in iterator:
+            pair = pairs[i]
+            if pair["cigar"] == 0:
+                # Adjusted pos should be equal to the new position or closer to the 3' end
+                if pair["ref_pos"] <= new_pos: 
+                    pos_5 = pair["ref_pos"]
+                    read_5 = pair["read_pos"]
+                    index_5 += i
+                    break
+
+    return pos_5, read_5
+
+def adjust_read5_cut(pairs5, read5, r5_closest, seg5):
+    # For the 5' alignment in sequential alignments on the same read, trim alignment range relative to  
+    # original read to remove cut site
+    if read5.is_forward:
+        if r5_closest < read5.reference_end:
+            trim_stop = r5_closest - 1
+            _, adj_trim_stop = get_ref_pos(pairs5, trim_stop, read5.is_forward)
+            seg5 = (seg5[0], adj_trim_stop + 1, seg5[2])
+    else:
+        if r5_closest > read5.reference_start - 4:
+            trim_stop = r5_closest + 4
+            _, adj_trim_stop = get_ref_pos(pairs5, trim_stop, read5.is_forward)
+            seg5 = (seg5[0], adj_trim_stop + 1, seg5[2])
+
+    return seg5
+
+def adjust_read3_cut(pairs3, read3, r3_closest, seg3):
+    # For the 3' alignment in sequential alignments on the same read, trim alignment range relative to 
+    # original read to remove cut site
+    if read3.is_forward:
+        if r3_closest >= read3.reference_start:
+            trim_stop = r3_closest + 4
+            _, adj_trim_stop = get_ref_pos(pairs3, trim_stop, read3.is_forward)
+            seg3 = (adj_trim_stop, seg3[1], seg3[2])
+    else:
+        if r3_closest <= read3.reference_end - 4:
+            trim_stop = r3_closest - 1
+            _, adj_trim_stop = get_ref_pos(pairs3, trim_stop, read3.is_forward)
+            seg3 = (adj_trim_stop, seg3[1], seg3[2])
+            
+    return seg3
+
+def get_cut_site_spans(site, seq):
+    spans = [i.span() for i in re.finditer(site, seq)]
+    return spans
+
+
+def closest_restriction_site(chrom, pos, restriction_sites_dict):
+
+    results = {}
+    
+    for enzyme in restriction_sites_dict:
+        results[enzyme] = {}
+        
+        restriction_sites_chrom = restriction_sites_dict[enzyme][chrom]
+    
+        insert = bisect.bisect_left(restriction_sites_chrom, pos)
+    
+        fragment = f"{chrom}_{insert-1}_{insert}"
+
+        upstream_pos = restriction_sites_chrom[insert-1] - 1
+        downstream_pos = restriction_sites_chrom[insert] - 1
+
+        upstream_dist = np.abs(upstream_pos - pos)
+        downstream_dist = np.abs(downstream_pos - pos)
+
+        if upstream_dist < downstream_dist:
+            dist = upstream_dist
+            site_pos = upstream_pos
+        else:
+            dist = downstream_dist
+            site_pos = downstream_pos
+
+        results[enzyme] = {"site_pos":site_pos, "dist":dist, "fragment": fragment}
+
+    return results
+
+def classify_breakpoint(r5_site_info, r3_site_info, max_cut_site_distance):
+
+    contact_classes = []
+    total_trim = {}
+    contact_enzyme = None
+
+    for enzyme in r5_site_info:
+        r5_dist = r5_site_info[enzyme]["dist"]
+        r3_dist = r3_site_info[enzyme]["dist"]
+        r5_less = r5_dist <= max_cut_site_distance
+        r3_less = r3_dist <= max_cut_site_distance
+
+        if r5_less and r3_less:
+            contact_classes.append(f"{enzyme}_both")
+            total_trim[enzyme] = r5_site_info[enzyme]["dist"] + r5_site_info[enzyme]["dist"] 
+        elif r5_less:
+            contact_classes.append(f"{enzyme}_5")
+        elif r3_less:
+            contact_classes.append(f"{enzyme}_3")
+
+    # Assign enzyme to valid contacts
+    # If there are multiple enzymes assigned to a valid contact, one will be chosen which will require the least trimming
+    if len(total_trim) == 0:
+        contact_enzyme = "chimera"
+    elif len(total_trim) == 1:
+        contact_enzyme = list(total_trim.keys())[0]
+    elif len(total_trim) > 1:
+        min_trim = min(total_trim.values())
+        possible_enzymes = [k for k, v in total_trim.items() if v==min_trim]
+        if len(possible_enzymes) == 1:
+            contact_enzyme = list(possible_enzymes.keys())[0]
+        elif len(possible_enzymes) > 1:
+            contact_enzyme = rng.choice(list(possible_enzymes.keys()))
+    return contact_classes, contact_enzyme
+
+def pair_to_restriction_site(read5, read3, restriction_sites, max_cut_site_distance):
+
+    if read5.is_forward:
+        r5_rs = closest_restriction_site(read5.reference_name, 
+                                read5.reference_end,
+                                restriction_sites)
+    else:
+        r5_rs = closest_restriction_site(read5.reference_name, 
+                        read5.reference_start,
+                        restriction_sites) 
+
+    if read3.is_forward:
+        r3_rs = closest_restriction_site(read3.reference_name, 
+                                        read3.reference_start,
+                                        restriction_sites)
+    else:
+        r3_rs = closest_restriction_site(read3.reference_name, 
+                                        read3.reference_end,
+                                        restriction_sites)
+
+    bp_class, bp_enzyme = classify_breakpoint(r5_rs, r3_rs, max_cut_site_distance)
+
+    return bp_class, bp_enzyme, r5_rs, r3_rs
+
+
+class ReadTrimmer:
+
+    def adjust_split(self,
+                     pairs5, 
+                     seg5, 
+                     read5,
+                     pairs3,
+                     seg3,
+                     read3
+                    ):
+
+        original_sequence = self.original_sequence
+        mate = self.mate
+        
+        overlap = seg5[1] - seg3[0]
+        original_overlap = overlap
+        cut_site_present = "none"
+        
+        if read5.mapping_quality > read3.mapping_quality:
+            r5_cover = True
+        elif read5.mapping_quality == read3.mapping_quality:
+            r5_len = len(read5.query_alignment_sequence)
+            r3_len = len(read3.query_alignment_sequence)
+            if r5_len > r3_len:
+                r5_cover = True
+            elif r5_len == r3_len:
+                r5_cover = rng.choice([True, False])
+            else:
+                r5_cover = False
+        else:
+            r5_cover = False
+
+
+        read5_cut = False
+        read3_cut = False
+        
+
+        bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(read5, read3, 
+                                                       self.restriction_sites, 
+                                                       self.max_cut_site_split_algn_dist)
+        
+        if bp_enzyme != "chimera":
+            r5_closest = r5_rs[bp_enzyme]["site_pos"]
+            r3_closest = r3_rs[bp_enzyme]["site_pos"]
+            seg5 = adjust_read5_cut(pairs5, read5, r5_closest, seg5)
+            seg3 = adjust_read3_cut(pairs3, read3, r3_closest, seg3)
+            overlap = seg5[1] - seg3[0]
+        
+        if overlap > 0:
+            # Handle overlap even if both reads had cut site trimming or neither reads had cut site
+            if r5_cover:
+                # Trim 3' read
+                seg3 = (seg5[1], seg3[1], seg3[2])
+            else:
+                seg5 = (seg5[0], seg3[0], seg5[2])
+
+        return seg5, seg3, bp_class, bp_enzyme, original_overlap
+    
+    def create_trimmed_mate(self, read, original_span, adjusted_span, pairs):
+
+        mate = self.mate
+        header = self.header
+        full_bam = self.full_bam
+        
+        if original_span == adjusted_span:
+            return read, pairs
+            
+        pos_5, index_5, read_5 = get_5_adj_point(pairs, adjusted_span[0], read.is_forward)
+        # Index is at end of range; subtract 1 to get actual final index
+        pos_3, index_3, read_3 = get_3_adj_point(pairs, adjusted_span[1] - 1, read.is_forward)
+    
+        if read.is_forward:
+            start_index = index_5
+            end_index = index_3
+            pos = pos_5
+        else:
+            start_index = index_3
+            end_index = index_5
+            pos = pos_3
+    
+        if start_index >= end_index:
+            return None, None
+        
+        new_pairs = pairs[start_index:end_index]
+        if not read.is_secondary:
+            left_pairs = softclip_pairs(pairs[:start_index])
+            right_pairs = softclip_pairs(pairs[end_index:])
+            new_pairs = left_pairs + new_pairs + right_pairs
+    
+        if read.is_secondary:
+            read_seq = ""
+            read_qual = ""
+            for pair in new_pairs:
+                if pair["cigar"] in [0, 1]:
+                    read_seq += pair["read_nuc"]
+                    read_qual += pair["read_qual"]
+        else:
+            read_seq = read.query_sequence
+            read_qual = pysam.qualities_to_qualitystring(read.query_qualities)
+    
+        cigartuples = build_cigar(read, pairs, start_index, end_index)
+        new_MD = get_md_tag(new_pairs)
+
+        if self.bisulfite:
+            new_ZC, new_ZR, new_NM = get_biscuit_tags(new_pairs, mate, read.is_forward)
+    
+            new_tags = {
+                "ZC" : new_ZC,
+                "ZR" : new_ZR,
+                "NM" : new_NM,
+                "MD" : new_MD
+            }
+        else:
+            new_NM = get_bwa_tags(new_pairs)
+
+            new_tags = {
+                "NM" : new_NM
+            }
+    
+        tags = read.get_tags()
+    
+        for i in range(len(tags)):
+            tag = tags[i]
+            if tag[0] in new_tags:
+                tags[i] = (tag[0], new_tags[tag[0]])
+    
+        real_trim_5 = read_5 - original_span[0]
+        real_trim_3 = original_span[1] - read_3 - 1 
+    
+        if full_bam:
+            tags.append(("ZU", real_trim_5))
+            tags.append(("ZD", real_trim_3))
+        
+        new_read = pysam.AlignedSegment(header=pysam.AlignmentHeader().from_dict(header))
+        new_read.query_name = read.query_name
+        new_read.query_sequence = read_seq
+        new_read.flag = read.flag
+        new_read.reference_id = read.reference_id
+        new_read.reference_start = pos
+        new_read.mapping_quality = read.mapping_quality
+        new_read.cigar = cigartuples
+        new_read.query_qualities = pysam.qualitystring_to_array(read_qual)
+        new_read.tags = tags
+    
+        return new_read, new_pairs
+    
+    def trim_mate(self):
+
+        ordered_reads = self.ordered_reads
+        seg_keys = self.seg_keys
+        mate = self.mate
+        
+        cut_site_keys = {}
+        overlap_keys = {}
+        cut_site_labels = {}
+        cut_site_classes = {}
+        illegal_post_trim = 0
+    
+        if len(seg_keys) == 1:
+            existing_data = ordered_reads[0]
+            existing_data["adjusted_span"] = seg_keys[0]
+            existing_data["trimmed_read"] = existing_data["read"]
+            existing_data["new_pairs"] = existing_data["pairs"]
+
+            self.cut_site_keys = cut_site_keys
+            self.cut_site_labels = cut_site_labels
+            self.cut_site_classes = cut_site_classes
+            self.overlap_keys = overlap_keys
+            self.illegal_post_trim = illegal_post_trim
+            
+            return
+    
+        # split read
+        adjusted_seg_keys = seg_keys.copy()
+        
+        for i in range(len(adjusted_seg_keys)-1):
+            seg5 = adjusted_seg_keys[i]
+            pairs5 = ordered_reads[i]["pairs"]
+            read5 = ordered_reads[i]["read"]
+            
+            seg3 = adjusted_seg_keys[i+1]
+            pairs3 = ordered_reads[i+1]["pairs"]
+            read3 = ordered_reads[i+1]["read"]
+    
+            mate = ordered_reads[1]["mate"]
+    
+            aseg5, aseg3, bp_class, bp_enzyme, overlap = self.adjust_split(pairs5, 
+                                                                            seg5, 
+                                                                            read5, 
+                                                                            pairs3, 
+                                                                            seg3, 
+                                                                            read3)
+    
+            adjusted_seg_keys[i] = aseg5
+            adjusted_seg_keys[i+1] = aseg3
+            cut_site_keys[(i, i+1)] = bp_class
+            cut_site_classes[(i, i+1)] = bp_enzyme
+            overlap_keys[(i, i+1)] = overlap
+    
+            if i not in cut_site_labels:
+                cut_site_labels[i] = []
+            if i+1 not in cut_site_labels:
+                cut_site_labels[i+1] = []
+    
+            if bp_enzyme != "chimera":
+                cut_site_labels[i].append("D")
+                cut_site_labels[i+1].append("U")
+    
+        all_keys = list(ordered_reads.keys())
+        
+        for key in all_keys:
+            ordered_reads[key]["adjusted_span"] = adjusted_seg_keys[key]
+            
+            trimmed_read, new_pairs = self.create_trimmed_mate(
+                ordered_reads[key]["read"], 
+                ordered_reads[key]["span"], 
+                ordered_reads[key]["adjusted_span"], 
+                ordered_reads[key]["pairs"]
+            )
+    
+            if trimmed_read == None: # Read is eliminated/erroneous by trimming
+                del ordered_reads[key] # Delete read from dictionary 
+                illegal_post_trim += 1
+            else:
+                ordered_reads[key]["trimmed_read"] = trimmed_read
+                ordered_reads[key]["new_pairs"] = new_pairs
+
+        self.cut_site_keys = cut_site_keys
+        self.cut_site_labels = cut_site_labels
+        self.cut_site_classes = cut_site_classes
+        self.overlap_keys = overlap_keys
+        self.illegal_post_trim = illegal_post_trim
+        
+        return
+        
+    def process_mate(self):
+
+        seg_keys = self.seg_keys
+        has_split = self.has_split
+        read_parts = self.read_parts
+        original_sequence = self.original_sequence
+        mate = self.mate
+        
+        ordered_reads = OrderedDict()
+
+        if len(seg_keys) == 1 and not has_split:
+            read = read_parts[seg_keys[0]]
+            span = seg_keys[0]
+            ordered_reads[0] = {"read" : read,
+                                "span" : span,
+                                "pairs" : None,
+                                "mate" : mate,
+                                "adjusted_span" : span,
+                                "trimmed_read" : read,
+                                "new_pairs" : None}
+
+            self.ordered_reads = ordered_reads
+            self.cut_site_keys = {}
+            self.cut_site_labels = {}
+            self.cut_site_classes = {}
+            self.overlap_keys = {}
+            self.illegal_post_trim = 0
+
+            return
+            
+        for i in range(len(seg_keys)):
+            read = read_parts[seg_keys[i]]
+            span = seg_keys[i]
+            ordered_reads[i] = {"read" : read,
+                                "span" : span,
+                                "pairs" : alignment_info(read, span, original_sequence),
+                                "mate" : mate
+                               }
+
+        self.ordered_reads = ordered_reads
+
+        self.trim_mate()
+
+        return
+    
+    def __init__(self,
+                 seg_keys, 
+                 original_sequence = "",
+                 read_parts = {},
+                 restriction_sites = {},
+                 header = None,
+                 full_bam = False,
+                 mate = "1",
+                 bisulfite=False,
+                 max_cut_site_split_algn_dist=20,
+                 max_cut_site_whole_algn_dist=500
+                ):
+
+        if len(seg_keys) == 0:
+            self.ordered_reads = OrderedDict()
+            self.has_split = False
+            self.cut_site_keys = {}
+            self.cut_site_labels = {}
+            self.overlap_keys = {}
+            self.cut_site_classes = {}
+            self.original_sequence = None
+            return
+            
+        self.has_split = read_parts[seg_keys[0]].has_tag("SA")
+            
+        self.seg_keys = seg_keys
+        self.original_sequence = original_sequence
+        self.read_parts = read_parts
+        self.restriction_sites = restriction_sites
+        self.header = header
+        self.full_bam = full_bam
+        self.mate = mate
+        self.bisulfite = bisulfite
+        self.max_cut_site_split_algn_dist = max_cut_site_split_algn_dist
+        self.max_cut_site_whole_algn_dist = max_cut_site_whole_algn_dist
+
+        self.process_mate()
+            
 def compute_genome_coverage(bam, min_mapq, min_base_quality, keep_dup=False):
     # Compute genome coverage
 
@@ -909,11 +1226,15 @@ def aggregate_qc_stats(cell,
     }, orient="index").T
 
 
-    # Post-trimming alignment and contacts stats
+    # Post-trimming alignment stats
 
     alignment_stats = f"{out_prefix}_alignment_stats.txt"
     alignment_df = pd.read_table(alignment_stats)
 
+    # Pairtools stats
+    pairtools_stats = f"{out_prefix}_pairtools_stats.txt"
+    pairtools_df = pd.read_table(pairtools_stats)
+    
     # ALLC stats
     
     methylation_stats = out_prefix + ".allc.tsv.gz_methylation_stats.txt"
@@ -961,7 +1282,8 @@ def aggregate_qc_stats(cell,
 
     # Aggregate
     all_stats = pd.concat([cell_df, trim_df, contam_df, dedup_df, 
-                           alignment_df, cov_map_df, methylation_df], axis=1)
+                           alignment_df, pairtools_df, cov_map_df, 
+                           methylation_df], axis=1)
 
     all_stats = all_stats.T
 

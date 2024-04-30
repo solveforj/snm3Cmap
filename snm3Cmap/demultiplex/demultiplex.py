@@ -2,14 +2,19 @@ from pathlib import Path
 import os
 import yaml
 
-def prepare_demultiplex(plate_info,
-                        output_directory,
-                        barcodes,
+def prepare_demultiplex(config,
                         jobs=2,
                         nolock=False,
                         rerun_incomplete=False
                        ):
 
+    with open(config) as f:
+        config_dict = yaml.safe_load(f)
+
+    barcodes = config_dict["setup"]["barcodes"]
+    output_directory = config_dict["setup"]["demultiplex_directory"]
+    plate_info = config_dict["setup"]["plate_info"]
+    
     Path(output_directory).mkdir(parents=True, exist_ok=True)
     
     with Path(__file__).with_name('demultiplex.Snakefile').open('r') as f:
