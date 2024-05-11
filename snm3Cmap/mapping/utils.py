@@ -58,7 +58,7 @@ def process_restriction_sites(restriction_sites):
     restriction_sites_dict = {}
 
     for file in restriction_sites:
-        enzyme = os.path.basename(file).split("_")[1].split(".txt")[0]
+        enzyme = os.path.basename(file).split("_")[-1].split(".txt")[0]
         restriction_sites_dict[enzyme] = {}
         with open(file) as f:
             for line in f:
@@ -798,9 +798,11 @@ def classify_breakpoint(r5_site_info, r3_site_info, max_cut_site_distance):
         min_trim = min(total_trim.values())
         possible_enzymes = [k for k, v in total_trim.items() if v==min_trim]
         if len(possible_enzymes) == 1:
-            contact_enzyme = list(possible_enzymes.keys())[0]
+            #contact_enzyme = list(possible_enzymes.keys())[0]
+            contact_enzyme = possible_enzymes[0]
         elif len(possible_enzymes) > 1:
-            contact_enzyme = rng.choice(list(possible_enzymes.keys()))
+            #contact_enzyme = rng.choice(list(possible_enzymes.keys()))
+            contact_enzyme = rng.choice(possible_enzymes)
     return contact_classes, contact_enzyme
 
 def pair_to_restriction_site(read5, read3, restriction_sites, max_cut_site_distance):
