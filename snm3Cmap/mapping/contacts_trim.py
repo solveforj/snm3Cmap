@@ -40,6 +40,9 @@ class ContactGenerator:
             self.illegal_overlap_alignments += removed_keys
             self.illegal_overlap_reads += 1
 
+        #print(mate)
+        #print(seg_keys)
+        
         read_trimmer = ReadTrimmer(seg_keys, 
                                    original_sequence,
                                    read_parts,
@@ -100,7 +103,8 @@ class ContactGenerator:
         
         if len(R1) + len(R2) >= 2:
             self.at_least_two_alignments += 1
-        
+
+            
         contacts, rule = contact_iter(R1, R2, min_mapq=self.min_mapq, 
                                       max_molecule_size=self.max_molecule_size, 
                                       max_inter_align_gap=self.max_inter_align_gap)

@@ -301,7 +301,7 @@ def classify_contact(algn1,
             cs_key = (idx5, idx3)
             if cs_key not in R1_cs_classes:
                 ct = "chimera"
-            if R1_cs_classes[cs_key] == "chimera":
+            elif R1_cs_classes[cs_key] == "chimera":
                 ct = "chimera"
                 overlap = R1_overlap_keys[cs_key]
                 cs_locs = R1_cs_keys[cs_key]
@@ -314,9 +314,10 @@ def classify_contact(algn1,
             idx5 = algn2["idx"]
             idx3 = algn1["idx"]
             cs_key = (idx5, idx3)
+            
             if cs_key not in R2_cs_classes:
                 ct = "chimera"
-            if R2_cs_classes[cs_key] == "chimera":
+            elif R2_cs_classes[cs_key] == "chimera":
                 ct = "chimera"
                 overlap = R2_overlap_keys[cs_key]
                 cs_locs = R2_cs_keys[cs_key]
@@ -335,7 +336,7 @@ def classify_contact(algn1,
     elif algn1["type"] == "R":
         if (0, 1) not in R2_cs_classes:
             ct = "chimera"
-        if R2_cs_classes[(0, 1)] == "none":
+        elif R2_cs_classes[(0, 1)] == "none":
             ct = "chimera"
             overlap = R2_overlap_keys[(0, 1)]
             cs_locs = R2_cs_keys[(0, 1)]
@@ -346,7 +347,7 @@ def classify_contact(algn1,
     elif algn2["type"] == "R":
         if (0, 1) not in R1_cs_classes:
             ct = "chimera"
-        if R1_cs_classes[(0, 1)] == "none":
+        elif R1_cs_classes[(0, 1)] == "none":
             ct = "chimera"
             overlap = R1_overlap_keys[(0, 1)]
             cs_locs = R1_cs_keys[(0, 1)]
