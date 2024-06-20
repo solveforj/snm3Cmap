@@ -62,7 +62,7 @@ class ContactGenerator:
     def process_read_group(self, read_group, read_group_name):
 
         bam_out = self.bam_out
-        chimeras_out = self.chimeras_out
+        artefacts_out = self.artefacts_out
         contacts_out = self.contacts_out
         
         if read_group == None:
@@ -100,6 +100,18 @@ class ContactGenerator:
         R2_cs_labels = R2_trimmer.cut_site_labels
         R2_has_split = R2_trimmer.has_split
 
+
+        self.total_chimera_pairs += R1_trimmer.total_pairs
+        self.total_chimera_pairs += R2_trimmer.total_pairs
+        
+        self.cut_site_chimera_pairs += R1_trimmer.cut_site_pairs
+        self.cut_site_chimera_pairs += R2_trimmer.cut_site_pairs
+
+        self.first_trim += R1_trimmer.first_trim
+        self.first_trim += R2_trimmer.first_trim
+        
+        self.second_trim += R1_trimmer.second_trim
+        self.second_trim += R2_trimmer.second_trim
         
         if len(R1) + len(R2) >= 2:
             self.at_least_two_alignments += 1
@@ -117,9 +129,9 @@ class ContactGenerator:
                                                                self.max_cut_site_whole_algn_dist
                                                               )
             
-            if contact_class in ["chimera"]:
-                write_pairs(hic_algn1, hic_algn2, read_group_name, pair_index, rule, contact_class, overlap, cs_locs, chimeras_out)
-                self.raw_chimeras += 1
+            if "artefact" in contact_class:
+                write_pairs(hic_algn1, hic_algn2, read_group_name, pair_index, rule, contact_class, overlap, cs_locs, artefacts_out)
+                self.raw_artefacts += 1
             elif contact_class not in ["short", "na"]:
                 write_pairs(hic_algn1, hic_algn2, read_group_name, pair_index, rule, contact_class, overlap, cs_locs, contacts_out)
                 self.raw_contacts += 1
@@ -219,7 +231,12 @@ class ContactGenerator:
         self.r2_split_alignments_dedup = 0
 
         self.raw_contacts = 0
-        self.raw_chimeras = 0
+        self.raw_artefacts = 0
+
+        self.total_chimera_pairs = 0
+        self.cut_site_chimera_pairs = 0
+        self.first_trim = 0
+        self.second_trim = 0
         
         iter_count = 0
         read_group_name = None
@@ -229,16 +246,16 @@ class ContactGenerator:
         with pysam.AlignmentFile(self.bam, index_filename=None) as bam_in:
             with pysam.AlignmentFile(self.masked_bam, 'wb', template=bam_in) as bam_out, \
                 open(self.contacts, 'w') as contacts_out, \
-                open(self.chimeras, 'w') as chimeras_out:
+                open(self.artefacts, 'w') as artefacts_out:
 
                 self.header = bam_in.header.to_dict()
                 self.bam_in = bam_in
                 self.bam_out = bam_out
                 self.contacts_out = contacts_out
-                self.chimeras_out = chimeras_out
+                self.artefacts_out = artefacts_out
 
                 initialize_pairs_file(contacts_out, self.chrom_sizes)
-                initialize_pairs_file(chimeras_out, self.chrom_sizes)
+                initialize_pairs_file(artefacts_out, self.chrom_sizes)
                 
                 for read in bam_in:
                     read_id = read.query_name.split("_")[0]
@@ -284,7 +301,12 @@ class ContactGenerator:
             "discarded_alignments_illegal_overlap" : self.illegal_overlap_alignments,
             "reads_with_illegal_overlap" : self.illegal_overlap_reads,
             "discarded_alignments_post_trim" : self.illegal_post_trim_count,
-            "pairs_with_multiple_valid_alignments" : self.at_least_two_alignments
+            "pairs_with_multiple_valid_alignments" : self.at_least_two_alignments,
+
+            "split_alignment_pairs_total" : self.total_chimera_pairs,
+            "split_alignment_pairs_with_cut_site" : self.cut_site_chimera_pairs,
+            "split_alignment_pairs_first_trim" : self.first_trim,
+            "split_alignment_pairs_second_trim" : self.second_trim
 
         }
         
@@ -323,7 +345,7 @@ class ContactGenerator:
         self.chrom_sizes = process_chrom_sizes(chrom_sizes)
         
         self.contacts = f'{out_prefix}_contacts.pairs'
-        self.chimeras = f'{out_prefix}_chimeras.pairs'
+        self.artefacts = f'{out_prefix}_artefacts.pairs'
         self.stats_path = f"{out_prefix}_alignment_stats.txt" 
         self.masked_bam = f'{out_prefix}_trimmed.bam'
 

@@ -12,7 +12,7 @@ def prepare_demultiplex(config,
         config_dict = yaml.safe_load(f)
 
     barcodes = config_dict["setup"]["barcodes"]
-    output_directory = config_dict["setup"]["demultiplex_directory"]
+    output_directory = config_dict["setup"]["output_directory"]
     plate_info = config_dict["setup"]["plate_info"]
     
     Path(output_directory).mkdir(parents=True, exist_ok=True)
@@ -27,6 +27,8 @@ def prepare_demultiplex(config,
         for line in f:
             line = line.strip()
             if len(line) == 0:
+                continue
+            if line[0] == "#":
                 continue
             line = line.split()
             fastq_directory, plate = line[0], line[1]

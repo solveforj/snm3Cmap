@@ -9,8 +9,8 @@ cell = config["cell"]
 
 rule all:
     input:
-        expand("{plate}_{cell}_contacts.dedup.pairs.gz", plate=plate, cell=cell),
-        expand("{plate}_{cell}_chimeras.dedup.pairs.gz", plate=plate, cell=cell),
+        expand("{plate}_{cell}_contacts.dedup.lowcov.pairs.gz", plate=plate, cell=cell),
+        expand("{plate}_{cell}_artefacts.dedup.pairs.gz", plate=plate, cell=cell),
         expand("{plate}_{cell}_trimmed.bam", plate=plate, cell=cell),
         expand("{plate}_{cell}.allc.tsv.gz", plate=plate, cell=cell),
         expand("{plate}_{cell}.allc.tsv.gz.tbi", plate=plate, cell=cell),
@@ -71,7 +71,7 @@ rule align_r1:
         bam_algn=temp("{plate}_{cell}_R1.bam"),
         bam_bsconv=temp("{plate}_{cell}_R1_bsconv.bam")
     threads: 
-        biscuit_threads
+        mapping_threads
     params:
         reference_path=parameters["align"]["reference_path"]
     shell:
@@ -89,7 +89,7 @@ rule align_r2:
         bam_algn=temp("{plate}_{cell}_R2.bam"),
         bam_bsconv=temp("{plate}_{cell}_R2_bsconv.bam")
     threads: 
-        biscuit_threads
+        mapping_threads
     params:
         reference_path=parameters["align"]["reference_path"]
     shell:
@@ -153,7 +153,7 @@ rule generate_contacts:
     output:
         bam="{plate}_{cell}_trimmed.bam",
         contacts=temp("{plate}_{cell}_contacts.pairs"),
-        chimeras=temp("{plate}_{cell}_chimeras.pairs"),
+        artefacts=temp("{plate}_{cell}_artefacts.pairs"),
         stats=temp("{plate}_{cell}_alignment_stats.txt")
     params:
         out_prefix=lambda wildcards: f"{wildcards.plate}_{wildcards.cell}",
@@ -188,10 +188,11 @@ rule pairtools_contacts:
     input:
         contacts = rules.generate_contacts.output.contacts
     output:
-        contacts_dedup = "{plate}_{cell}_contacts.dedup.pairs.gz",
+        contacts_dedup = temp("{plate}_{cell}_contacts.dedup.pairs.gz"),
         stats = temp("{plate}_{cell}_contacts_dedup_stats.txt")
     params:
-        chrom_sizes=parameters["pairtools"]["chrom_sizes"]
+        chrom_sizes=parameters["pairtools"]["chrom_sizes"],
+        max_mismatch=parameters["pairtools"]["max_mismatch"]
     threads:
         1
     shell:
@@ -200,37 +201,79 @@ rule pairtools_contacts:
         if [ $contact_count -ge 1 ]; then
             pairtools flip --chroms-path {params.chrom_sizes} {input.contacts} | \
             pairtools sort --nproc {threads} - | \
-            pairtools dedup -p 1 --output {output.contacts_dedup} --output-stats {output.stats} - 
+            pairtools dedup -p {threads} --max-mismatch {params.max_mismatch} \
+                --output {output.contacts_dedup} --output-stats {output.stats} - 
         else
-            bgzip -k {input.contacts}
-            cp {input.contacts}.gz {output.contacts_dedup}
+            bgzip -kf {input.contacts}
+            pairtools sort --nproc {threads} --output {output.contacts_dedup} {input.contacts}.gz 
             rm {input.contacts}.gz
             touch {output.stats}
         fi
         """
 
-rule pairtools_chimeras:
+rule pairtools_artefacts:
     input:
-        chimeras = rules.generate_contacts.output.chimeras
+        artefacts = rules.generate_contacts.output.artefacts
     output:
-        chimeras_dedup = "{plate}_{cell}_chimeras.dedup.pairs.gz",
-        stats = temp("{plate}_{cell}_chimeras_dedup_stats.txt")
+        artefacts_dedup = temp("{plate}_{cell}_artefacts_temp.dedup.pairs.gz"),
+        stats = temp("{plate}_{cell}_artefacts_dedup_stats.txt")
     params:
-        chrom_sizes=parameters["pairtools"]["chrom_sizes"]
+        chrom_sizes=parameters["pairtools"]["chrom_sizes"],
+        max_mismatch=parameters["pairtools"]["max_mismatch"]
     threads:
         1
     shell:
         """
-        contact_count=`awk '!/^#/{{count++}} END{{ print count+0 }}' {input.chimeras}`
+        contact_count=`awk '!/^#/{{count++}} END{{ print count+0 }}' {input.artefacts}`
         if [ $contact_count -ge 1 ]; then
-            pairtools flip --chroms-path {params.chrom_sizes} {input.chimeras} | \
+            pairtools flip --chroms-path {params.chrom_sizes} {input.artefacts} | \
             pairtools sort --nproc {threads} - | \
-            pairtools dedup -p 1 --output {output.chimeras_dedup} --output-stats {output.stats} - 
+            pairtools dedup -p {threads} --max-mismatch {params.max_mismatch} \
+                --output {output.artefacts_dedup} --output-stats {output.stats} - 
         else
-            bgzip -k {input.chimeras}
-            cp {input.chimeras}.gz {output.chimeras_dedup}
-            rm {input.chimeras}.gz
+            bgzip -kf {input.artefacts}
+            pairtools sort --nproc {threads} --output {output.artefacts_dedup} {input.artefacts}.gz 
+            rm {input.artefacts}.gz
             touch {output.stats}
+        fi
+        """
+
+rule pairtools_filterbycov:
+    input:
+        contacts_dedup = rules.pairtools_contacts.output.contacts_dedup,
+        artefacts_dedup = rules.pairtools_artefacts.output.artefacts_dedup
+    output:
+        lowcov = "{plate}_{cell}_contacts.dedup.lowcov.pairs.gz",
+        highcov = temp("{plate}_{cell}_contacts.dedup.highcov.pairs.gz"),
+        stats = temp("{plate}_{cell}_filterbycov_stats.txt"),
+        merged = "{plate}_{cell}_artefacts.dedup.pairs.gz"
+    params:
+        max_cov=parameters["pairtools_filterbycov"]["max_cov"],
+        max_dist=parameters["pairtools_filterbycov"]["max_dist"],
+        method=parameters["pairtools_filterbycov"]["method"]
+    threads:
+        1
+    shell:
+        """
+        contact_count=`zcat {input.contacts_dedup} | awk '!/^#/{{count++}} END{{ print count+0 }}' -`
+        if [ $contact_count -ge 1 ]; then
+            pairtools filterbycov \
+                --output {output.lowcov} \
+                --output-highcov {output.highcov} \
+                --output-stats {output.stats} \
+                --max-cov {params.max_cov} \
+                --max-dist {params.max_dist} \
+                --method {params.method}  \
+                {input.contacts_dedup}
+            pairtools merge \
+                --output {output.merged} \
+                --nproc {threads} \
+                {input.artefacts_dedup} {output.highcov}
+        else
+            cp {input.artefacts_dedup} {output.merged}
+            touch {output.highcov}
+            touch {output.stats}
+            cp {input.contacts_dedup} {output.lowcov} 
         fi
         """
 
@@ -238,8 +281,9 @@ rule pairtools_stats:
     input:
         contacts = rules.pairtools_contacts.output.contacts_dedup,
         contacts_stats = rules.pairtools_contacts.output.stats,
-        chimeras = rules.pairtools_chimeras.output.chimeras_dedup,
-        chimeras_stats = rules.pairtools_chimeras.output.stats,
+        artefacts = rules.pairtools_artefacts.output.artefacts_dedup,
+        artefacts_stats = rules.pairtools_artefacts.output.stats,
+        filterbycov_stats = rules.pairtools_filterbycov.output.stats
     output:
         pairtools_stats = temp("{plate}_{cell}_pairtools_stats.txt")
     params:
@@ -250,9 +294,10 @@ rule pairtools_stats:
         'snm3Cmap pairtools-stats '
         '--out-prefix {params.out_prefix} '
         '--contacts {input.contacts} '
-        '--chimeras {input.chimeras} '
+        '--artefacts {input.artefacts} '
         '--contacts-stats {input.contacts_stats} '
-        '--chimeras-stats {input.chimeras_stats} '
+        '--artefacts-stats {input.artefacts_stats} '
+        '--filterbycov-stats {input.filterbycov_stats} '
 
 rule mask:
     input:

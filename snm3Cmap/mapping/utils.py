@@ -145,24 +145,36 @@ def compute_pair_stats(pair_file, pair_dup_stats):
 
 def pairtools_stats(out_prefix,
                     contacts,
-                    chimeras,
+                    artefacts,
                     contacts_stats,
-                    chimeras_stats
+                    artefacts_stats,
+                    filterbycov_stats
                    ):
 
     stats_path = f"{out_prefix}_pairtools_stats.txt"
     
     contacts_stats = compute_pair_stats(contacts, contacts_stats)
 
-    chimeras_stats = compute_pair_stats(chimeras, chimeras_stats)
+    artefacts_stats = compute_pair_stats(artefacts, artefacts_stats)
 
+    with open(filterbycov_stats) as f:
+        highcov = 0.0
+        for line in f:
+            if "pair_types/FF" in line:
+                try:
+                    highcov = float(line.strip().split()[1])
+                except ValueError:
+                    highcov = 0.0
+                break
+    contacts_stats["high_coverage_pairs"] = highcov
+                
     full_stats = {}
 
     for i in contacts_stats:
         full_stats["contacts_" + i] = contacts_stats[i]
 
-    for i in chimeras_stats:
-        full_stats["chimeras_" + i] = chimeras_stats[i]
+    for i in artefacts_stats:
+        full_stats["artefacts_" + i] = artefacts_stats[i]
 
     stats_df = pd.DataFrame.from_dict(full_stats, orient="index").T
     stats_df.to_csv(stats_path, index=False, sep="\t")
@@ -279,8 +291,8 @@ def classify_contact(algn1,
     R1_overlap_keys = R1_trimmer.overlap_keys
     R2_overlap_keys = R2_trimmer.overlap_keys
     
-    overlap = "NA"
-    cs_locs = []
+    overlap = 0
+    cs_locs = ["na"]
     
 
     if not algn1["is_mapped"] or not algn1["is_unique"]:
@@ -300,9 +312,9 @@ def classify_contact(algn1,
             idx3 = algn2["idx"]
             cs_key = (idx5, idx3)
             if cs_key not in R1_cs_classes:
-                ct = "chimera"
-            elif R1_cs_classes[cs_key] == "chimera":
-                ct = "chimera"
+                ct = "artefact_chimera"
+            elif R1_cs_classes[cs_key] == "artefact":
+                ct = "artefact_chimera"
                 overlap = R1_overlap_keys[cs_key]
                 cs_locs = R1_cs_keys[cs_key]
             else:
@@ -316,9 +328,9 @@ def classify_contact(algn1,
             cs_key = (idx5, idx3)
             
             if cs_key not in R2_cs_classes:
-                ct = "chimera"
-            elif R2_cs_classes[cs_key] == "chimera":
-                ct = "chimera"
+                ct = "artefact_chimera"
+            elif R2_cs_classes[cs_key] == "artefact":
+                ct = "artefact_chimera"
                 overlap = R2_overlap_keys[cs_key]
                 cs_locs = R2_cs_keys[cs_key]
             else:
@@ -328,16 +340,16 @@ def classify_contact(algn1,
         elif contact_type == "R1&2" or contact_type == "R1-2":
             bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(algn1["read"], algn2["read"], 
                                                              restriction_sites, max_cut_site_whole_algn_dist)
-            if bp_enzyme != "chimera":
+            if bp_enzyme != "artefact":
                 ct = "gap"
             else:
-                ct = "chimera"
+                ct = "artefact_gap"
                 
     elif algn1["type"] == "R":
         if (0, 1) not in R2_cs_classes:
-            ct = "chimera"
-        elif R2_cs_classes[(0, 1)] == "none":
-            ct = "chimera"
+            ct = "artefact_chimera"
+        elif R2_cs_classes[(0, 1)] == "artefact":
+            ct = "artefact_chimera"
             overlap = R2_overlap_keys[(0, 1)]
             cs_locs = R2_cs_keys[(0, 1)]
         else:
@@ -346,9 +358,9 @@ def classify_contact(algn1,
             cs_locs = R2_cs_keys[(0, 1)]
     elif algn2["type"] == "R":
         if (0, 1) not in R1_cs_classes:
-            ct = "chimera"
-        elif R1_cs_classes[(0, 1)] == "none":
-            ct = "chimera"
+            ct = "artefact_chimera"
+        elif R1_cs_classes[(0, 1)] == "artefact":
+            ct = "artefact_chimera"
             overlap = R1_overlap_keys[(0, 1)]
             cs_locs = R1_cs_keys[(0, 1)]
         else:
@@ -359,10 +371,10 @@ def classify_contact(algn1,
     elif algn1["type"] == "U" and algn2["type"] == "U":
         bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(algn1["read"], algn2["read"], 
                                                                      restriction_sites, max_cut_site_whole_algn_dist)
-        if bp_enzyme != "chimera":
+        if bp_enzyme != "artefact":
             ct = "gap"
         else:
-            ct = "chimera"
+            ct = "artefact_gap"
 
     if algn1["chrom"] == algn2["chrom"]:
         if np.abs(algn1["pos"] - algn2["pos"]) < min_intra_dist:
@@ -746,14 +758,29 @@ def closest_restriction_site(chrom, pos, restriction_sites_dict):
         results[enzyme] = {}
         
         restriction_sites_chrom = restriction_sites_dict[enzyme][chrom]
-    
+
+        rs_chrom_len = len(restriction_sites_chrom)
+        
         insert = bisect.bisect_left(restriction_sites_chrom, pos)
+
+        if insert <= 0:
+            fragment = f"{chrom}_{insert}_{insert}"
+            
+            upstream_pos = restriction_sites_chrom[insert] - 1
+            downstream_pos = restriction_sites_chrom[insert] - 1
+
+        elif insert >= rs_chrom_len:
+            fragment = f"{chrom}_{insert-1}_{insert-1}"
+            
+            upstream_pos = restriction_sites_chrom[insert-1] - 1
+            downstream_pos = restriction_sites_chrom[insert-1] - 1
+
+        else:
+            fragment = f"{chrom}_{insert-1}_{insert}"
     
-        fragment = f"{chrom}_{insert-1}_{insert}"
-
-        upstream_pos = restriction_sites_chrom[insert-1] - 1
-        downstream_pos = restriction_sites_chrom[insert] - 1
-
+            upstream_pos = restriction_sites_chrom[insert-1] - 1
+            downstream_pos = restriction_sites_chrom[insert] - 1
+    
         upstream_dist = np.abs(upstream_pos - pos)
         downstream_dist = np.abs(downstream_pos - pos)
 
@@ -791,7 +818,7 @@ def classify_breakpoint(r5_site_info, r3_site_info, max_cut_site_distance):
     # Assign enzyme to valid contacts
     # If there are multiple enzymes assigned to a valid contact, one will be chosen which will require the least trimming
     if len(total_trim) == 0:
-        contact_enzyme = "chimera"
+        contact_enzyme = "artefact"
     elif len(total_trim) == 1:
         contact_enzyme = list(total_trim.keys())[0]
     elif len(total_trim) > 1:
@@ -870,13 +897,20 @@ class ReadTrimmer:
         bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(read5, read3, 
                                                        self.restriction_sites, 
                                                        self.max_cut_site_split_algn_dist)
+        self.total_pairs += 1
+
+        if overlap > 0:
+            self.first_trim += 1
         
-        if bp_enzyme != "chimera":
+        if bp_enzyme != "artefact":
             r5_closest = r5_rs[bp_enzyme]["site_pos"]
             r3_closest = r3_rs[bp_enzyme]["site_pos"]
             seg5 = adjust_read5_cut(pairs5, read5, r5_closest, seg5)
             seg3 = adjust_read3_cut(pairs3, read3, r3_closest, seg3)
             overlap = seg5[1] - seg3[0]
+            if overlap > 0:
+                self.second_trim += 1
+            self.cut_site_pairs += 1
         
         if overlap > 0:
             # Handle overlap even if both reads had cut site trimming or neither reads had cut site
@@ -1034,7 +1068,7 @@ class ReadTrimmer:
             if i+1 not in cut_site_labels:
                 cut_site_labels[i+1] = []
     
-            if bp_enzyme != "chimera":
+            if bp_enzyme != "artefact":
                 cut_site_labels[i].append("D")
                 cut_site_labels[i+1].append("U")
     
@@ -1131,6 +1165,10 @@ class ReadTrimmer:
             self.overlap_keys = {}
             self.cut_site_classes = {}
             self.original_sequence = None
+            self.cut_site_pairs = 0
+            self.first_trim = 0
+            self.second_trim = 0
+            self.total_pairs = 0
             return
             
         self.has_split = read_parts[seg_keys[0]].has_tag("SA")
@@ -1145,6 +1183,11 @@ class ReadTrimmer:
         self.bisulfite = bisulfite
         self.max_cut_site_split_algn_dist = max_cut_site_split_algn_dist
         self.max_cut_site_whole_algn_dist = max_cut_site_whole_algn_dist
+        self.cut_site_pairs = 0
+        self.first_trim = 0
+        self.second_trim = 0
+        self.total_pairs = 0
+        
 
         self.process_mate()
             

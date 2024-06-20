@@ -15,7 +15,6 @@ def mask_qualities(read, start, end):
         if i[0] != 5: # Do not include hard clipping (on secondary alignments)
             full_cigar += [i[0]] * i[1]
 
-    
     qual_idx = 0
     algn_idx = read.reference_start
     mask = False

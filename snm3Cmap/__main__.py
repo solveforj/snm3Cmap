@@ -182,7 +182,7 @@ def mask_overlaps_register_subparser(subparser):
 
     parser_opt = parser.add_argument_group("optional arguments")
 
-    parser_req.add_argument('--min-mapq', type=int, default=30, required=True,
+    parser_opt.add_argument('--min-mapq', type=int, default=30,
                             help='Minimum MAPQ to consider alignment')
 
 def bam_to_allc_register_subparser(subparser):
@@ -226,7 +226,7 @@ def pairtools_stats_register_subparser(subparser):
     parser = subparser.add_parser('pairtools-stats',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                   help="""
-                                        Compute stats for pairs files for contacts and non-ligation chimeras 
+                                        Compute stats for pairs files for contacts and non-ligation artefacts 
                                         """
                                  )
     # Required arguments
@@ -238,14 +238,17 @@ def pairtools_stats_register_subparser(subparser):
     parser_req.add_argument('--contacts', type=str, default=None, required=True,
                             help='Path to contacts pairs file')
     
-    parser_req.add_argument('--chimeras', type=str, default=None, required=True,
-                            help='Path to non-ligation chimeras pairs file')
+    parser_req.add_argument('--artefacts', type=str, default=None, required=True,
+                            help='Path to non-ligation artefacts pairs file')
 
     parser_req.add_argument('--contacts-stats', type=str, default=None, required=True,
                             help='Path to pairtools dedup stats for contacts pairs file')
 
-    parser_req.add_argument('--chimeras-stats', type=str, default=None, required=True,
-                            help='Path to pairtools dedup stats for non-ligation-chimeras pairs file')
+    parser_req.add_argument('--artefacts-stats', type=str, default=None, required=True,
+                            help='Path to pairtools dedup stats for non-ligation-artefacts pairs file')
+    
+    parser_req.add_argument('--filterbycov-stats', type=str, default=None, required=True,
+                            help='Path to pairtools filterbycov stats for contacts pairs file')
                             
     
 def aggregate_qc_stats_register_subparser(subparser):
@@ -323,7 +326,7 @@ def main():
     elif cur_command in ['demultiplex']:
         from .demultiplex import demultiplexer as func
     elif cur_command in ['prepare-mapping']:
-        from .mapping import prepare_mapping as func
+        from .mapping import PrepareMapping as func
     elif cur_command in ['contamination-filter']:
         from .mapping import ContaminationFilter as func
     elif cur_command in ['call-contacts']:
