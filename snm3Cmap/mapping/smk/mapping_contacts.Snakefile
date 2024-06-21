@@ -6,22 +6,22 @@ with open(parameters_path) as f:
 
 r1_fastq = config["r1"]
 r2_fastq = config["r2"]
-cell = config["cell"]
+exp = config["exp"]
 
 rule all:
     input:
-        expand("{cell}_contacts.pairs", cell=cell),
-        expand("{cell}_artefacts.pairs", cell=cell),
-        expand("{cell}_trimmed.bam", cell=cell),
-        expand("{cell}_alignment_stats.txt", cell=cell)
+        expand("{exp}_contacts.pairs", exp=exp),
+        expand("{exp}_artefacts.pairs", exp=exp),
+        expand("{exp}_trimmed.bam", exp=exp),
+        expand("{exp}_alignment_stats.txt", exp=exp)
         
 rule reformat:
     input:
         r1=r1_fastq,
         r2=r2_fastq
     output:
-        r1=temp("{cell}_R1_trimmed_reformat.fastq.gz"),
-        r2=temp("{cell}_R2_trimmed_reformat.fastq.gz")
+        r1=temp("{exp}_R1_trimmed_reformat.fastq.gz"),
+        r2=temp("{exp}_R2_trimmed_reformat.fastq.gz")
     threads:
         1
     shell:
@@ -37,7 +37,7 @@ rule align_r1:
     input:
         fastq=rules.reformat.output.r1
     output:
-        bam_algn=temp("{cell}_R1.bam"),
+        bam_algn=temp("{exp}_R1.bam"),
     threads: 
         mapping_threads
     params:
@@ -51,7 +51,7 @@ rule align_r2:
     input:
         fastq=rules.reformat.output.r2
     output:
-        bam_algn=temp("{cell}_R2.bam"),
+        bam_algn=temp("{exp}_R2.bam"),
     threads: 
         mapping_threads
     params:
@@ -66,8 +66,8 @@ rule merge_sort:
         r1=rules.align_r1.output.bam_algn,
         r2=rules.align_r2.output.bam_algn
     output:
-        merged=temp("{cell}_merged.bam"),
-        sorted=temp("{cell}_merged_sorted.bam")
+        merged=temp("{exp}_merged.bam"),
+        sorted=temp("{exp}_merged_sorted.bam")
     threads: 
         10
     shell:
@@ -80,12 +80,12 @@ rule generate_contacts:
     input:
         bam = rules.merge_sort.output.sorted
     output:
-        bam="{cell}_trimmed.bam",
-        contacts="{cell}_contacts.pairs",
-        artefacts="{cell}_artefacts.pairs",
-        stats="{cell}_alignment_stats.txt"
+        bam="{exp}_trimmed.bam",
+        contacts="{exp}_contacts.pairs",
+        artefacts="{exp}_artefacts.pairs",
+        stats="{exp}_alignment_stats.txt"
     params:
-        out_prefix=lambda wildcards: f"{wildcards.cell}",
+        out_prefix=lambda wildcards: f"{wildcards.exp}",
         chrom_sizes=parameters["generate_contacts"]["chrom_sizes"],
         restriction_sites=parameters["generate_contacts"]["restriction_sites"],
         min_mapq=parameters["generate_contacts"]["min_mapq"],

@@ -32,7 +32,7 @@ def initialize_pairs_file(handle, chrom_sizes):
     handle.write("## pairs format v1.0\n")
     for chrom in chrom_sizes:
         handle.write(f'#chromsize: {chrom} {str(chrom_sizes[chrom])}\n')
-    handle.write("#columns: readID chrom1 pos1 chrom2 pos2 strand1 strand2 pair_type rule reads contact_class overlap cut_site_locs\n")
+    handle.write("#columns: readID chrom1 pos1 chrom2 pos2 strand1 strand2 pair_type rule reads contact_class multimap_overlap cut_site_locs\n")
 
 def make_short(out_prefix):
     

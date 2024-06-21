@@ -74,7 +74,7 @@ class PrepareMapping:
         smk_path = os.path.join(Path(__file__).parent.resolve(), "smk", smk_path)
         
         output_directory = self.config_dict["setup"]["output_directory"]
-        cell_info = self.config_dict["setup"]["cell_info"]
+        fastq_info = self.config_dict["setup"]["fastq_info"]
 
         Path(output_directory).mkdir(parents=True, exist_ok=True)
         
@@ -82,7 +82,7 @@ class PrepareMapping:
             snake_template = f.read()
             
         with open(f"{output_directory}/mapping_scripts.txt", 'w') as scripts, \
-            open(cell_info) as f:
+            open(fastq_info) as f:
     
             for line in f:
                 line = line.strip()
@@ -91,19 +91,19 @@ class PrepareMapping:
                 if line[0] == "#":
                     continue
                 line = line.split()
-                cell, r1_fastq, r2_fastq = line[0], line[1], line[2]
+                exp, r1_fastq, r2_fastq = line[0], line[1], line[2]
                 
-                cell_run_directory = os.path.join(output_directory, cell)
-                cell_run_directory_path = Path(cell_run_directory)
-                cell_run_directory_path.mkdir(parents=True, exist_ok=True)
+                exp_run_directory = os.path.join(output_directory, exp)
+                exp_run_directory_path = Path(exp_run_directory)
+                exp_run_directory_path.mkdir(parents=True, exist_ok=True)
                         
-                snakemake_cmd = f"{cell_run_directory}/mapping_cmd.txt"
+                snakemake_cmd = f"{exp_run_directory}/mapping_cmd.txt"
                 scripts.write(snakemake_cmd + "\n")
                         
                 with open(snakemake_cmd, 'w') as f:
-                    cmd = f"snakemake -d {cell_run_directory} "
+                    cmd = f"snakemake -d {exp_run_directory} "
                     cmd += f"--snakefile {output_directory}/mapping.smk -c {self.jobs} "
-                    cmd += f"--config r1={r1_fastq} r2={r2_fastq} cell={cell} {self.nolock} {self.rerun_incomplete} "
+                    cmd += f"--config r1={r1_fastq} r2={r2_fastq} exp={exp} {self.nolock} {self.rerun_incomplete} "
                     f.write(cmd + '\n')
 
         params_write = "\n".join([f"{k} = {v}" for k, v in self.params.items()])
