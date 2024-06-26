@@ -25,10 +25,7 @@ rule all:
     input:
         expand(fq_out_r1, cell_id=cell_ids),
         expand(fq_out_r2, cell_id=cell_ids),
-        f"{plate}_demultiplex_stats.txt",
-        f"{plate}_R1.fastq.gz",
-        f"{plate}_R2.fastq.gz"
-
+        f"{plate}_demultiplex_stats.txt"
 
 rule concatenate_R1:
     output:

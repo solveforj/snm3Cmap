@@ -322,9 +322,7 @@ def main():
     cur_command = args_vars.pop('command').lower().replace('_', '-')
     # Do real import here:
     if cur_command in ['prepare-demultiplex']:
-        from .demultiplex import prepare_demultiplex as func
-    elif cur_command in ['demultiplex']:
-        from .demultiplex import demultiplexer as func
+        from .demultiplex import PrepareDemultiplex as func
     elif cur_command in ['prepare-mapping']:
         from .mapping import PrepareMapping as func
     elif cur_command in ['contamination-filter']:

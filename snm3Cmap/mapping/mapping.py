@@ -36,7 +36,7 @@ class PrepareMapping:
                 if line[0] == "#":
                     continue
                 line = line.split()
-                fastq_directory, plate = line[0], line[1]
+                plate, fastq_directory = line[0], line[1]
                 
                 plate_run_directory = os.path.join(output_directory, plate)
     
