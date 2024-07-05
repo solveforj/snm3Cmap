@@ -1,0 +1,20 @@
+setup:
+    mode: "contacts"
+    fastq_info: "/path/to/fastq_info.txt" 
+    output_directory: "/path/to/output/directory"
+    
+align:
+    reference_path: "/path/to/ref.fa"
+    
+generate_contacts:
+    chrom_sizes : "/path/to/chrom_sizes.txt"
+    min_mapq : 30
+    restriction_sites :
+        - "/path/to/restriction/sites.txt"
+    max_molecule_size : 750
+    max_inter_align_gap: 20
+    trim_reporting: "full"
+    min_intra_dist: 1000
+    read_type: "wgs"
+    max_cut_site_split_algn_dist: 20
+    max_cut_site_whole_algn_dist: 500

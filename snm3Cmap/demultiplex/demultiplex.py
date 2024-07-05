@@ -14,6 +14,8 @@ class PrepareDemultiplex:
         
         if self.mode == "snm3Cseq":
             smk_path = 'demultiplex_snm3Cseq.Snakefile'
+        elif self.mode == "scalemethyl":
+            smk_path = 'demultiplex_scalemethyl.Snakefile'
             
         smk_path = os.path.join(Path(__file__).parent.resolve(), "smk", smk_path)
     
@@ -73,7 +75,9 @@ class PrepareDemultiplex:
         self.nolock = "--nolock" if nolock else ""
         self.rerun_incomplete = "--rerun-incomplete" if rerun_incomplete else ""
 
-        if "snm3Cseq" in self.mode:
+        if "snm3Cseq" == self.mode:
+            self.snm3Cseq()
+        elif "scalemethyl" == self.mode:
             self.snm3Cseq()
         else:
             print("Mode not recognized!")

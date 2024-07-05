@@ -1,0 +1,56 @@
+setup:
+    mode: "snm3Cseq"
+    plate_info: "/path/to/plate_info.txt" 
+    output_directory: "/path/for/output/demultiplexed/fastq/files"
+    barcodes: "/path/to/barcodes"
+
+trim:
+    # Standard adapters - should not have to be changed
+    r1_adapter: "AGATCGGAAGAGCACACGTCTGAAC"
+    r2_adapter: "AGATCGGAAGAGCGTCGTGTAGGGA"
+
+align:
+    reference_path: "/u/project/cluo/jgalasso/resources/references/hg38_chrL/biscuit/hg38_chrL.fa"
+
+contam_filter:
+    min_mapq : 30
+
+mark_duplicates:
+    reference_path: "/u/project/cluo/jgalasso/resources/references/hg38_chrL/biscuit/hg38_chrL.fa"
+    
+generate_contacts:
+    chrom_sizes : "/u/project/cluo/jgalasso/resources/references/hg38_chrL/hg38_chrL.chrom.natsort.sizes"
+    min_mapq : 30
+    restriction_sites :
+        - "/u/project/cluo/jgalasso/resources/references/hg38_chrL/restriction_enzyme_sites/hg38_chrL_MboI.txt"
+        - "/u/project/cluo/jgalasso/resources/references/hg38_chrL/restriction_enzyme_sites/hg38_chrL_NlaIII.txt"
+    max_molecule_size : 750
+    max_inter_align_gap: 20
+    trim_reporting: "full"
+    min_intra_dist: 1000
+    read_type: "bisulfite"
+    max_cut_site_split_algn_dist: 20
+    max_cut_site_whole_algn_dist: 500
+
+pairtools:
+    chrom_sizes : "/u/project/cluo/jgalasso/resources/references/hg38_chrL/hg38_chrL.chrom.natsort.sizes"
+    max_mismatch: 3
+
+pairtools_filterbycov:
+    max_cov: 10
+    max_dist: 1000
+    method: "max"
+
+mask:
+    min_mapq : 30
+    
+bam_to_allc:
+    num_upstr_bases: 0
+    num_downstr_bases: 2
+    min_base_quality: 20
+    min_mapq: 30
+    reference_path: "/u/project/cluo/jgalasso/resources/references/hg38_chrL/biscuit/hg38_chrL.fa"
+    
+aggregate_stats:
+    min_base_quality: 20
+    min_mapq: 30

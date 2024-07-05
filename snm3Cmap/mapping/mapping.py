@@ -15,6 +15,8 @@ class PrepareMapping:
         
         if self.mode == "snm3Cseq":
             smk_path = 'mapping_snm3Cseq.Snakefile'
+        elif self.mode == "scalemethyl":
+            smk_path = 'mapping_scalemethyl.Snakefile'
             
         smk_path = os.path.join(Path(__file__).parent.resolve(), "smk", smk_path)
     
@@ -53,7 +55,7 @@ class PrepareMapping:
                         with open(snakemake_cmd, 'w') as f:
                             cmd = f"snakemake -d {cell_run_directory} "
                             cmd += f"--snakefile {plate_run_directory}/mapping.smk -c {self.jobs} "
-                            cmd += f"--config cell={cell} plate={plate} {self.nolock} {self.rerun_incomplete} "
+                            cmd += f"--config 'cell=\"{cell}\"' 'plate=\"{plate}\"' {self.nolock} {self.rerun_incomplete} "
                             f.write(cmd + '\n')
             
                 params_write = "\n".join([f"{k} = {v}" for k, v in self.params.items()])
@@ -136,8 +138,12 @@ class PrepareMapping:
         self.nolock = "--nolock" if nolock else ""
         self.rerun_incomplete = "--rerun-incomplete" if rerun_incomplete else ""
 
-        if "snm3Cseq" in self.mode:
+        if "snm3Cseq" == self.mode:
             
+            self.snm3Cseq()
+
+        elif "scalemethyl" == self.mode:
+
             self.snm3Cseq()
 
         else:

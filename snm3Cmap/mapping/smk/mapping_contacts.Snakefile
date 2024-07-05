@@ -10,8 +10,8 @@ exp = config["exp"]
 
 rule all:
     input:
-        expand("{exp}_contacts.pairs", exp=exp),
-        expand("{exp}_artefacts.pairs", exp=exp),
+        expand("{exp}_contacts.pairs.gz", exp=exp),
+        expand("{exp}_artefacts.pairs.gz", exp=exp),
         expand("{exp}_trimmed.bam", exp=exp),
         expand("{exp}_alignment_stats.txt", exp=exp)
         
@@ -26,10 +26,10 @@ rule reformat:
         1
     shell:
         """
-        gzip -cd {input.r1} | awk -F' ' '{{l=l+1; if ((l-1)%4==0) {{$2=1;print $1"_"$2;}}else{{print $0}}}}' \
+        gzip -cd {input.r1} | awk -F' ' '{{l=l+1; if ((l-1)%4==0) {{$2=1;split($1,a,"/");print a[1] "_" $2;}}else{{print $0}}}}' \
             | gzip -c > {output.r1} 
         
-        gzip -cd {input.r2} | awk -F' ' '{{l=l+1; if ((l-1)%4==0) {{$2=2;print $1"_"$2;}}else{{print $0}}}}' \
+        gzip -cd {input.r2} | awk -F' ' '{{l=l+1; if ((l-1)%4==0) {{$2=2;split($1,a,"/");print a[1] "_" $2;}}else{{print $0}}}}' \
             | gzip -c > {output.r2}
         """
 
@@ -81,8 +81,8 @@ rule generate_contacts:
         bam = rules.merge_sort.output.sorted
     output:
         bam="{exp}_trimmed.bam",
-        contacts="{exp}_contacts.pairs",
-        artefacts="{exp}_artefacts.pairs",
+        contacts=temp("{exp}_contacts.pairs"),
+        artefacts=temp("{exp}_artefacts.pairs"),
         stats="{exp}_alignment_stats.txt"
     params:
         out_prefix=lambda wildcards: f"{wildcards.exp}",
@@ -112,3 +112,18 @@ rule generate_contacts:
         '--read-type {params.read_type} '
         '--max-cut-site-split-algn-dist {params.max_cut_site_split_algn_dist} '
         '--max-cut-site-whole-algn-dist {params.max_cut_site_whole_algn_dist} '
+
+rule decompress_contacts:
+    input:
+        contacts=rules.generate_contacts.output.contacts,
+        artefacts=rules.generate_contacts.output.artefacts
+    output:
+        contacts="{exp}_contacts.pairs.gz",
+        artefacts="{exp}_artefacts.pairs.gz"
+    threads:
+        1
+    shell:
+        """
+        bgzip -k {input.contacts}
+        bgzip -k {input.artefacts}
+        """
