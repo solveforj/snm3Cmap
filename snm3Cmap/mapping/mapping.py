@@ -12,13 +12,17 @@ class PrepareMapping:
         output_directory = self.config_dict["setup"]["output_directory"]
 
         Path(output_directory).mkdir(parents=True, exist_ok=True)
-        
+
         if self.mode == "snm3Cseq":
             smk_path = 'mapping_snm3Cseq.Snakefile'
         elif self.mode == "scalemethyl":
             smk_path = 'mapping_scalemethyl.Snakefile'
             
         smk_path = os.path.join(Path(__file__).parent.resolve(), "smk", smk_path)
+
+        # If custom snakefile is given, override above choice of smk_path
+        if self.snakefile:
+            smk_path = self.snakefile
     
         with open(smk_path) as f:
             snake_template = f.read()
@@ -74,6 +78,10 @@ class PrepareMapping:
             raise ValueError('Valid mode was not provided!')
 
         smk_path = os.path.join(Path(__file__).parent.resolve(), "smk", smk_path)
+
+        # If custom snakefile is given, override above choice of smk_path
+        if self.snakefile:
+            smk_path = self.snakefile
         
         output_directory = self.config_dict["setup"]["output_directory"]
         fastq_info = self.config_dict["setup"]["fastq_info"]
@@ -118,6 +126,7 @@ class PrepareMapping:
                  config,
                  jobs=2,
                  nolock=False,
+                 snakefile=None,
                  rerun_incomplete=False
                 ):
         
@@ -129,6 +138,7 @@ class PrepareMapping:
         mapping_threads = jobs // 2 if jobs > 1 else 1
 
         self.jobs = jobs
+        self.snakefile = snakefile
         
         self.params = {
             "mapping_threads" : f'{mapping_threads}',

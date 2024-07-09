@@ -90,6 +90,9 @@ def prepare_mapping_register_subparser(subparser):
     
     parser_opt.add_argument('--nolock', action="store_true", 
                             help='If set, Snakemake is run with --nolock (working directory will not be locked)')
+
+    parser_opt.add_argument('--snakefile', type=str, default=None,
+                        help='Specify a custom Snakefile path')
     
     parser_opt.add_argument('--rerun-incomplete', action="store_true",
                             help="""If set, Snakemake is run with --rerun-incomplete 
