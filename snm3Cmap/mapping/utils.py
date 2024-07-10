@@ -278,7 +278,9 @@ def classify_contact(algn1,
                      R2_trimmer,
                      rule,
                      restriction_sites,
-                     min_intra_dist = 1000,
+                     min_inward_dist=1000,
+                     min_outward_dist=1000,
+                     min_same_strand_dist=0,
                      max_cut_site_whole_algn_dist = 500
                   ):
 
@@ -338,7 +340,7 @@ def classify_contact(algn1,
                 overlap = R2_overlap_keys[cs_key]
                 cs_locs = R2_cs_keys[cs_key]
         elif contact_type == "R1&2" or contact_type == "R1-2":
-            bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(algn1["read"], algn2["read"], 
+            bp_class, bp_enzyme, r5_rs, r3_rs = gap_pair_to_restriction_site(algn1["read"], algn2["read"], 
                                                              restriction_sites, max_cut_site_whole_algn_dist)
             if bp_enzyme != "artefact":
                 ct = "gap"
@@ -369,7 +371,7 @@ def classify_contact(algn1,
             cs_locs = R1_cs_keys[(0, 1)]
 
     elif algn1["type"] == "U" and algn2["type"] == "U":
-        bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(algn1["read"], algn2["read"], 
+        bp_class, bp_enzyme, r5_rs, r3_rs = gap_pair_to_restriction_site(algn1["read"], algn2["read"], 
                                                                      restriction_sites, max_cut_site_whole_algn_dist)
         if bp_enzyme != "artefact":
             ct = "gap"
@@ -377,8 +379,22 @@ def classify_contact(algn1,
             ct = "artefact_gap"
 
     if algn1["chrom"] == algn2["chrom"]:
-        if np.abs(algn1["pos"] - algn2["pos"]) < min_intra_dist:
-            ct = "short"
+        if algn1["pos"] < algn2["pos"]:
+            min_algn = algn1
+            max_algn = algn2
+        else:
+            min_algn = algn2
+            max_algn = algn1
+
+        if max_algn["strand"] == min_algn["strand"]:
+            if (max_algn["pos"] - min_algn["pos"]) < min_same_strand_dist:
+                ct = "short"
+        elif min_algn["strand"] == "+":
+            if (max_algn["pos"] - min_algn["pos"]) < min_inward_dist:
+                ct = "short"
+        elif min_algn["strand"] == "-":
+            if (max_algn["pos"] - min_algn["pos"]) < min_outward_dist:
+                ct = "short"
 
     return ct, overlap, cs_locs
 
@@ -750,7 +766,7 @@ def get_cut_site_spans(site, seq):
     return spans
 
 
-def closest_restriction_site(chrom, pos, restriction_sites_dict):
+def closest_restriction_site(chrom, pos, restriction_sites_dict, rule="closest"):
 
     results = {}
     
@@ -784,10 +800,17 @@ def closest_restriction_site(chrom, pos, restriction_sites_dict):
         upstream_dist = np.abs(upstream_pos - pos)
         downstream_dist = np.abs(downstream_pos - pos)
 
-        if upstream_dist < downstream_dist:
+        if rule == "closest":
+            if upstream_dist < downstream_dist:
+                dist = upstream_dist
+                site_pos = upstream_pos
+            else:
+                dist = downstream_dist
+                site_pos = downstream_pos
+        elif rule == "upstream":
             dist = upstream_dist
             site_pos = upstream_pos
-        else:
+        elif rule == "downstream":
             dist = downstream_dist
             site_pos = downstream_pos
 
@@ -832,7 +855,7 @@ def classify_breakpoint(r5_site_info, r3_site_info, max_cut_site_distance):
             contact_enzyme = rng.choice(possible_enzymes)
     return contact_classes, contact_enzyme
 
-def pair_to_restriction_site(read5, read3, restriction_sites, max_cut_site_distance):
+def split_pair_to_restriction_site(read5, read3, restriction_sites, max_cut_site_distance):
 
     if read5.is_forward:
         r5_rs = closest_restriction_site(read5.reference_name, 
@@ -856,6 +879,31 @@ def pair_to_restriction_site(read5, read3, restriction_sites, max_cut_site_dista
 
     return bp_class, bp_enzyme, r5_rs, r3_rs
 
+def gap_pair_to_restriction_site(read5, read3, restriction_sites, max_cut_site_distance):
+
+    if read5.is_forward:
+        r5_rule = "downstream"
+        r5_pos = read5.reference_end
+    else:
+        r5_rule = "upstream"
+        r5_pos = read5.reference_start
+
+    r5_rs = closest_restriction_site(read5.reference_name, 
+                                     r5_pos, restriction_sites, rule=r5_rule) 
+
+    if read3.is_forward:
+        r3_rule = "upstream"
+        r3_pos = read3.reference_start
+    else:
+        r3_rule = "downstream"
+        r3_pos = read3.reference_end
+        
+    r3_rs = closest_restriction_site(read3.reference_name, 
+                                     r3_pos, restriction_sites, rule=r3_rule) 
+    
+    bp_class, bp_enzyme = classify_breakpoint(r5_rs, r3_rs, max_cut_site_distance)
+
+    return bp_class, bp_enzyme, r5_rs, r3_rs
 
 class ReadTrimmer:
 
@@ -894,7 +942,7 @@ class ReadTrimmer:
         read3_cut = False
         
 
-        bp_class, bp_enzyme, r5_rs, r3_rs = pair_to_restriction_site(read5, read3, 
+        bp_class, bp_enzyme, r5_rs, r3_rs = split_pair_to_restriction_site(read5, read3, 
                                                        self.restriction_sites, 
                                                        self.max_cut_site_split_algn_dist)
         self.total_pairs += 1

@@ -27,7 +27,9 @@ generate_contacts:
     max_molecule_size : 750
     max_inter_align_gap: 20
     trim_reporting: "full"
-    min_intra_dist: 1000
+    min_inward_distance: 1000
+    min_outward_distance: 1000
+    min_same_strand_distance: 0
     read_type: "bisulfite"
     max_cut_site_split_algn_dist: 20
     max_cut_site_whole_algn_dist: 500

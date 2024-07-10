@@ -125,7 +125,10 @@ class ContactGenerator:
             
             contact_class, overlap, cs_locs = classify_contact(hic_algn1, hic_algn2, pair_index, 
                                                                R1_trimmer, R2_trimmer, rule, 
-                                                               self.restriction_sites, self.min_intra_dist,
+                                                               self.restriction_sites, 
+                                                               self.min_inward_dist,
+                                                               self.min_outward_dist,
+                                                               self.min_same_strand_dist,
                                                                self.max_cut_site_whole_algn_dist
                                                               )
             
@@ -322,7 +325,9 @@ class ContactGenerator:
                  max_molecule_size=750, 
                  max_inter_align_gap=20,
                  trim_reporting="minimal",
-                 min_intra_dist=1000,
+                 min_inward_dist=1000,
+                 min_outward_dist=1000,
+                 min_same_strand_dist=0,
                  read_type="bisulfite",
                  max_cut_site_split_algn_dist = 10,
                  max_cut_site_whole_algn_dist = 500
@@ -331,8 +336,13 @@ class ContactGenerator:
         self.min_mapq = min_mapq
         self.max_molecule_size = max_molecule_size
         self.max_inter_align_gap = max_inter_align_gap
-        self.min_intra_dist = min_intra_dist
+
+        self.min_inward_dist = min_inward_dist
+        self.min_outward_dist = min_outward_dist
+        self.min_same_strand_dist = min_same_strand_dist
+        
         self.full_bam = trim_reporting == "full"
+        
         self.out_prefix = out_prefix
         self.bam = bam
         self.bisulfite = read_type == "bisulfite"

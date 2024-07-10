@@ -92,7 +92,9 @@ rule generate_contacts:
         max_molecule_size=parameters["generate_contacts"]["max_molecule_size"],
         max_inter_align_gap=parameters["generate_contacts"]["max_inter_align_gap"],
         trim_reporting=parameters["generate_contacts"]["trim_reporting"],
-        min_intra_distance=parameters["generate_contacts"]["min_intra_dist"],
+        min_inward_distance=parameters["generate_contacts"]["min_inward_distance"],
+        min_outward_distance=parameters["generate_contacts"]["min_outward_distance"],
+        min_same_strand_distance=parameters["generate_contacts"]["min_same_strand_distance"],
         read_type=parameters["generate_contacts"]["read_type"],
         max_cut_site_split_algn_dist=parameters["generate_contacts"]["max_cut_site_split_algn_dist"],
         max_cut_site_whole_algn_dist=parameters["generate_contacts"]["max_cut_site_whole_algn_dist"]
@@ -108,7 +110,9 @@ rule generate_contacts:
         '--max-molecule-size {params.max_molecule_size} '
         '--max-inter-align-gap {params.max_inter_align_gap} '
         '--trim-reporting {params.trim_reporting} '
-        '--min-intra-dist {params.min_intra_distance} '
+        '--min-inward-dist {params.min_inward_distance} '
+        '--min-outward-dist {params.min_outward_distance} '
+        '--min-same-strand-dist {params.min_same_strand_distance} '
         '--read-type {params.read_type} '
         '--max-cut-site-split-algn-dist {params.max_cut_site_split_algn_dist} '
         '--max-cut-site-whole-algn-dist {params.max_cut_site_whole_algn_dist} '
