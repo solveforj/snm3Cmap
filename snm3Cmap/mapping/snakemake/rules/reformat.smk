@@ -1,4 +1,6 @@
 
+joint_alignments = config["align"]["allow_joint_alignments"]
+
 if trim_output == "interleaved":
     
     rule reformat:
@@ -20,7 +22,7 @@ if trim_output == "interleaved":
                     "gzip -c > {output}"
                 )    
 
-elif trim_output == "separate":
+elif trim_output == "separate" and not joint_alignments:
 
     rule reformat_r1:
         input:

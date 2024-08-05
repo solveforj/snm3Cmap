@@ -12,39 +12,15 @@ if trim_output == "interleaved":
             config["align"]["threads"]
         params:
             reference_path=config["general"]["reference_path"],
-            extra=config["align"]["biscuit_interleaved_params"]
+            extra=config["align"]["joint_params"]
         retries: 3
         shell:
             """
-            biscuit align -@ {threads} {params.extra} -M {params.reference_path} {input} \
+            biscuit align -@ {threads} -p {params.extra} -M {params.reference_path} {input} \
                 | samtools sort -o {output} -O BAM 
             """
 
-    if contamination_protocol == "default":
-    
-        rule bsconv:
-            input:
-                rules.align.output
-            output:
-                temp("{id}_bsconv.bam")
-            threads:
-                1
-            params:
-                reference_path=config["general"]["reference_path"]
-            shell:
-                """
-                biscuit bsconv {params.reference_path} {input} {output} 
-                """
-
-        def get_bams(wildcards):
-            return f"{wildcards.id}_bsconv.bam"
-    
-    else:
-    
-        def get_bams(wildcards):
-            return f"{wildcards.id}.bam"
-
-elif trim_output == "separate":
+elif trim_output == "separate" and not joint_alignments:
 
     rule align_r1:
         input:
@@ -55,7 +31,7 @@ elif trim_output == "separate":
             config["align"]["threads"]
         params:
             reference_path=config["general"]["reference_path"],
-            extra=config["align"]["biscuit_R1_params"]
+            extra=config["align"]["separate_R1_params"]
         retries: 3
         shell:
             """
@@ -72,7 +48,7 @@ elif trim_output == "separate":
             config["align"]["threads"]
         params:
             reference_path=config["general"]["reference_path"],
-            extra=config["align"]["biscuit_R2_params"]
+            extra=config["align"]["separate_R1_params"]
         retries: 3
         shell:
             """
@@ -119,3 +95,49 @@ elif trim_output == "separate":
         def get_bams(wildcards):
     
             return expand("{id}_R{mate}.bam", id=wildcards.id, mate=[1, 2])
+
+elif trim_output == "separate" and joint_alignments:
+
+    rule align:
+        input:
+            get_trimmed_r1_fastq, 
+            get_trimmed_r2_fastq
+        output:
+            temp("{id}.bam")
+        threads: 
+            config["align"]["threads"]
+        params:
+            reference_path=config["general"]["reference_path"],
+            extra=config["align"]["joint_params"]
+        retries: 3
+        shell:
+            """
+            biscuit align -@ {threads} -p {params.extra} -M {params.reference_path} {input} \
+                | samtools sort -o {output} -O BAM 
+            """
+
+if (trim_output == "interleaved") or (trim_output == "separate" and joint_alignments):
+
+    if contamination_protocol == "default":
+
+        rule bsconv:
+            input:
+                rules.align.output
+            output:
+                temp("{id}_bsconv.bam")
+            threads:
+                1
+            params:
+                reference_path=config["general"]["reference_path"]
+            shell:
+                """
+                biscuit bsconv {params.reference_path} {input} {output} 
+                """
+    
+        def get_bams(wildcards):
+            return f"{wildcards.id}_bsconv.bam"
+
+    else:
+    
+        def get_bams(wildcards):
+            return f"{wildcards.id}.bam"

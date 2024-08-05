@@ -13,9 +13,6 @@ if allc_protocol == "default":
 
         include: "allc.smk"
 
-    else:
-
-        raise Exception("Allc cannot be generated for non-bisulfite-converted DNA.")
 
 
 

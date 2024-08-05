@@ -16,7 +16,9 @@ rule generate_contacts:
         out_prefix=lambda wildcards: f"{wildcards.id}",
         chrom_sizes=config["general"]["chrom_sizes"],
         restriction_sites=config["contacts"]["restriction_sites"],
-        extra=config["contacts"]["call_params"]
+        extra=config["contacts"]["call_params"],
+        manual_mate_annotation="--manual-mate-annotation" if (trim_output == "separate" and 
+                                                              not joint_alignments) else ""
     threads:
         1
     shell:
@@ -26,6 +28,7 @@ rule generate_contacts:
         '--chrom-sizes {params.chrom_sizes} '
         '--restriction-sites {params.restriction_sites} '
         '{params.extra} '
+        '{params.manual_mate_annotation} '
 
 rule compress_contacts:
     input:
