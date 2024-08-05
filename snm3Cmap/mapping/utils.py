@@ -72,7 +72,7 @@ def process_restriction_sites(restriction_sites):
 
     return restriction_sites_dict
 
-def compute_pair_stats(pair_file, pair_dup_stats):
+def compute_pair_stats(pair_file, pair_dup_stats=None):
 
     contact_stats = {
         "total" : 0,
@@ -100,19 +100,6 @@ def compute_pair_stats(pair_file, pair_dup_stats):
         contacts.columns = pairs_columns
     except ValueError:
         contacts = pd.DataFrame(columns = pairs_columns)
-
-    with open(pair_dup_stats) as f:
-        pairs_dup_rate = None
-        for line in f:
-            if "summary/frac_dups" in line:
-                try:
-                    pairs_dup_rate = float(line.strip().split()[1])
-                except ValueError:
-                    pairs_dup_rate = np.nan
-                break
-        # handles empty file case
-        if pairs_dup_rate == None:
-            pairs_dup_rate = np.nan
                     
 
     contacts["type_rule"] = contacts["pair_type"] + "_" + contacts["rule"]
@@ -139,16 +126,28 @@ def compute_pair_stats(pair_file, pair_dup_stats):
     
     contact_stats["total"] = len(contacts)
 
-    contact_stats["dup_rate"] = pairs_dup_rate
+    pairs_dup_rate = np.nan
+    if pair_dup_stats:
+        if os.path.isfile(pair_dup_stats):
+            with open(pair_dup_stats) as f:
+                for line in f:
+                    if "summary/frac_dups" in line:
+                        try:
+                            pairs_dup_rate = float(line.strip().split()[1])
+                        except ValueError:
+                            pairs_dup_rate = np.nan
+                        break
+                        
+            contact_stats["dup_rate"] = pairs_dup_rate
     
     return contact_stats
 
 def pairtools_stats(out_prefix,
                     contacts,
                     artefacts,
-                    contacts_stats,
-                    artefacts_stats,
-                    filterbycov_stats
+                    contacts_stats=None,
+                    artefacts_stats=None,
+                    filterbycov_stats=None
                    ):
 
     stats_path = f"{out_prefix}_pairtools_stats.txt"
@@ -157,16 +156,18 @@ def pairtools_stats(out_prefix,
 
     artefacts_stats = compute_pair_stats(artefacts, artefacts_stats)
 
-    with open(filterbycov_stats) as f:
-        highcov = 0.0
-        for line in f:
-            if "pair_types/FF" in line:
-                try:
-                    highcov = float(line.strip().split()[1])
-                except ValueError:
-                    highcov = 0.0
-                break
-    contacts_stats["high_coverage_pairs"] = highcov
+    if filterbycov_stats:
+        if os.path.isfile(filterbycov_stats):
+            with open(filterbycov_stats) as f:
+                highcov = 0.0
+                for line in f:
+                    if "pair_types/FF" in line:
+                        try:
+                            highcov = float(line.strip().split()[1])
+                        except ValueError:
+                            highcov = 0.0
+                        break
+            contacts_stats["high_coverage_pairs"] = highcov
                 
     full_stats = {}
 
@@ -397,6 +398,51 @@ def classify_contact(algn1,
                 ct = "short"
 
     return ct, overlap, cs_locs
+
+def divide_reads_default(read_group):
+    
+    r1 = []
+    r1_primary = None
+    
+    r2 = []
+    r2_primary = None
+
+    for read in read_group:
+        if read.is_read1:
+            if not read.is_secondary:
+                r1_primary = read
+            r1.append(read)
+        elif read.is_read2:
+            if not read.is_secondary:
+                r2_primary = read
+            r2.append(read)
+        else:
+            if not read.is_secondary:
+                r1_primary = read
+            r1.append(read)
+
+    return r1, r1_primary, r2, r2_primary
+
+
+def divide_reads_manual_annotation(read_group):
+    
+    r1 = []
+    r1_primary = None
+    
+    r2 = []
+    r2_primary = None
+
+    for read in read_group:
+        if read.query_name.split("_")[1] == "1":
+            if not read.is_secondary:
+                r1_primary = read
+            r1.append(read)
+        elif read.query_name.split("_")[1] == "2":
+            if not read.is_secondary:
+                r2_primary = read
+            r2.append(read)
+
+    return r1, r1_primary, r2, r2_primary
 
 def get_biscuit_tags(pairs, mate, is_forward):
 
@@ -1268,117 +1314,114 @@ def compute_mapped_nucleotides(bam, min_mapq, min_base_quality, keep_dup=False):
     out = p2.stdout.strip()
     mapped_read_bases = int(out)
     return mapped_read_bases
-    
-def aggregate_qc_stats(cell, 
+
+def snm3Cseq_qc_stats(job,
                        out_prefix, 
                        min_mapq = 30, 
                        min_base_quality = 20):
-
-    # Trimming stats
-    trim_stats = f"{out_prefix}_trim_stats.txt"
-    with open(trim_stats) as f:
-        line_count = 0
-        for line in f:
-            if line_count == 1:
-                tstats = line.strip().split("\t")
-                in_pairs = float(tstats[1])
-            elif line_count == 3:
-                tstats = line.strip().split("\t")
-                out_r1 = float(tstats[6])
-            elif line_count == 5:
-                tstats = line.strip().split("\t")
-                out_r2 = float(tstats[6])
-            line_count += 1
-    trim_df = pd.DataFrame.from_dict({"demultiplexed_pairs": in_pairs,
-                                         "trimmed_R1_mates" : out_r1,
-                                         "trimmed_R2_mates" : out_r2
-                                        }, orient="index").T
-
-    # Contamination stats
-    contam_stats = f"{out_prefix}_contam_stats.txt"
-    contam_df = pd.read_table(contam_stats).astype(float)
-
-    # Alignment duplicates stats
-    dup_stats = f"{out_prefix}_dupsifter_stats.txt"
-    dup_count = 0
-    with open(dup_stats) as f:
-        line_count = 0
-        for line in f:
-            if line_count in [6, 7]:
-                dup_count += int(line.strip().split(": ")[-1])
-            line_count += 1
-    pre_dedup_count = (contam_df["R1_contam_pass"] + contam_df["R2_contam_pass"]).values[0]
-    if pre_dedup_count == 0:
-        dup_rate = np.nan
-    else:
-        dup_rate = dup_count / pre_dedup_count
-
-    dedup_df = pd.DataFrame.from_dict({
-        "pre_dedup_mates" : pre_dedup_count,
-        "duplicate_mates" : dup_count,
-        "alignment_dup_rate" : dup_rate
-    }, orient="index").T
-
-
-    # Post-trimming alignment stats
-
-    alignment_stats = f"{out_prefix}_alignment_stats.txt"
-    alignment_df = pd.read_table(alignment_stats)
-
-    # Pairtools stats
-    pairtools_stats = f"{out_prefix}_pairtools_stats.txt"
-    pairtools_df = pd.read_table(pairtools_stats)
     
-    # ALLC stats
+    txt_paths = [f"{out_prefix}_trim_stats.txt",
+                 f"{out_prefix}_contam_stats.txt",
+                 f"{out_prefix}_dupsifter_stats.txt", 
+                 f"{out_prefix}_alignment_stats.txt",
+                 f"{out_prefix}_pairtools_stats.txt",
+                 f"{out_prefix}.allc.tsv.gz_methylation_stats.txt"
+                ]
     
-    methylation_stats = out_prefix + ".allc.tsv.gz_methylation_stats.txt"
-    methylation_df = pd.read_table(methylation_stats)
-
-    # Cell information
+    stat_dfs = [pd.DataFrame([job], columns=["job"])]
+    for path in txt_paths:
+        if os.path.exists(path):
+            stat_dfs.append(pd.read_table(path).astype(float))                 
     
-    cell_df = pd.DataFrame([cell], columns=["cell"])
-
-    # Coverage stats
-    
+    cov_map_stats = []
+    cov_map_columns = []
     trimmed_bam = f"{out_prefix}_trimmed_sorted.bam"
+    if os.path.exists(trimmed_bam):
+        genome_cov_dedup_trim = compute_genome_coverage(trimmed_bam, min_mapq, min_base_quality, keep_dup=False)
+        mapped_nuc_dedup_trim = compute_mapped_nucleotides(trimmed_bam, min_mapq, min_base_quality, keep_dup=False)
+        cov_map_stats += [genome_cov_dedup_trim, mapped_nuc_dedup_trim]
+        cov_map_columns += ["reference_coverage_dedup_trim", "mapped_nucleotides_dedup_trim"]
+
     mkdup_bam = f"{out_prefix}_mkdup_sorted.bam"
+    if os.path.exists(mkdup_bam):
+        genome_cov_dup = compute_genome_coverage(mkdup_bam, min_mapq, min_base_quality, keep_dup=True)
+        genome_cov_dedup = compute_genome_coverage(mkdup_bam, min_mapq, min_base_quality, keep_dup=False)
+        mapped_nuc_dup = compute_mapped_nucleotides(mkdup_bam, min_mapq, min_base_quality, keep_dup=True)
+        mapped_nuc_dedup = compute_mapped_nucleotides(mkdup_bam, min_mapq, min_base_quality, keep_dup=False)
+        cov_map_stats += [genome_cov_dup, genome_cov_dedup, mapped_nuc_dup, mapped_nuc_dedup]
+        cov_map_columns += ["reference_coverage_dup", "reference_coverage_dedup", "mapped_nucleotides_dup", "mapped_nucleotides_dedup"]
+
     masked_bam = f"{out_prefix}_masked_sorted.bam"
+    if os.path.exists(masked_bam):
+        genome_cov_dedup_mask = compute_genome_coverage(masked_bam, min_mapq, min_base_quality, keep_dup=False)
+        mapped_nuc_dedup_mask = compute_mapped_nucleotides(masked_bam, min_mapq, min_base_quality, keep_dup=False)
+        cov_map_stats += [genome_cov_dedup_mask, mapped_nuc_dedup_mask]
+        cov_map_columns += ["reference_coverage_dedup_mask", "mapped_nucleotides_dedup_mask"]
 
-    genome_cov_dup = compute_genome_coverage(mkdup_bam, min_mapq, min_base_quality, keep_dup=True)
-    genome_cov_dedup = compute_genome_coverage(mkdup_bam, min_mapq, min_base_quality, keep_dup=False)
-    genome_cov_dedup_trim = compute_genome_coverage(trimmed_bam, min_mapq, min_base_quality, keep_dup=False)
-    genome_cov_dedup_mask = compute_genome_coverage(masked_bam, min_mapq, min_base_quality, keep_dup=False)
+    cov_map_df = pd.DataFrame([cov_map_stats], columns=cov_map_columns)
+    stat_dfs.append(cov_map_df)
 
-    mapped_nuc_dup = compute_mapped_nucleotides(mkdup_bam, min_mapq, min_base_quality, keep_dup=True)
-    mapped_nuc_dedup = compute_mapped_nucleotides(mkdup_bam, min_mapq, min_base_quality, keep_dup=False)
-    mapped_nuc_dedup_trim = compute_mapped_nucleotides(trimmed_bam, min_mapq, min_base_quality, keep_dup=False)
-    mapped_nuc_dedup_mask = compute_mapped_nucleotides(masked_bam, min_mapq, min_base_quality, keep_dup=False)
+    return stat_dfs
+
+
     
-    cov_map_df = pd.DataFrame([[genome_cov_dup, 
-                                genome_cov_dedup,
-                                genome_cov_dedup_trim,
-                                genome_cov_dedup_mask,
-                                mapped_nuc_dup,
-                                mapped_nuc_dedup,
-                                mapped_nuc_dedup_trim,
-                                mapped_nuc_dedup_mask
-                               ]], 
-                              columns=["reference_coverage_dup",
-                                       "reference_coverage_dedup",
-                                       "reference_coverage_dedup_trim",
-                                       "reference_coverage_dedup_mask",
-                                       "mapped_nucleotides_dup",
-                                       "mapped_nucleotides_dedup",
-                                       "mapped_nucleotides_dedup_trim",
-                                       "mapped_nucleotides_dedup_mask",
-                                      ]
-                             )
+def aggregate_qc_stats(job,
+                       out_prefix, 
+                       mode,
+                       min_mapq = 30, 
+                       min_base_quality = 20):
 
-    # Aggregate
-    all_stats = pd.concat([cell_df, trim_df, contam_df, dedup_df, 
-                           alignment_df, pairtools_df, cov_map_df, 
-                           methylation_df], axis=1)
+    if mode in ["snm3Cseq", "bsdna"]:
 
+        txt_paths = [f"{out_prefix}_trim_stats.txt",
+                 f"{out_prefix}_contam_stats.txt",
+                 f"{out_prefix}_dupsifter_stats.txt", 
+                 f"{out_prefix}_alignment_stats.txt",
+                 f"{out_prefix}_pairtools_stats.txt",
+                 f"{out_prefix}.allc.tsv.gz_methylation_stats.txt"
+                ]
+
+    elif mode == "dna":
+        
+        txt_paths = [f"{out_prefix}_trim_stats.txt",
+                 f"{out_prefix}_alignment_stats.txt",
+                 f"{out_prefix}_pairtools_stats.txt",
+                ]
+    
+    stat_dfs = [pd.DataFrame([job], columns=["job"])]
+    for path in txt_paths:
+        if os.path.exists(path):
+            stat_dfs.append(pd.read_table(path).astype(float))                 
+    
+    cov_map_stats = []
+    cov_map_columns = []
+    trimmed_bam = f"{out_prefix}_trimmed_sorted.bam"
+    if os.path.exists(trimmed_bam):
+        genome_cov_dedup_trim = compute_genome_coverage(trimmed_bam, min_mapq, min_base_quality, keep_dup=False)
+        mapped_nuc_dedup_trim = compute_mapped_nucleotides(trimmed_bam, min_mapq, min_base_quality, keep_dup=False)
+        cov_map_stats += [genome_cov_dedup_trim, mapped_nuc_dedup_trim]
+        cov_map_columns += ["reference_coverage_dedup_trim", "mapped_nucleotides_dedup_trim"]
+
+    mkdup_bam = f"{out_prefix}_mkdup_sorted.bam"
+    if os.path.exists(mkdup_bam):
+        genome_cov_dup = compute_genome_coverage(mkdup_bam, min_mapq, min_base_quality, keep_dup=True)
+        genome_cov_dedup = compute_genome_coverage(mkdup_bam, min_mapq, min_base_quality, keep_dup=False)
+        mapped_nuc_dup = compute_mapped_nucleotides(mkdup_bam, min_mapq, min_base_quality, keep_dup=True)
+        mapped_nuc_dedup = compute_mapped_nucleotides(mkdup_bam, min_mapq, min_base_quality, keep_dup=False)
+        cov_map_stats += [genome_cov_dup, genome_cov_dedup, mapped_nuc_dup, mapped_nuc_dedup]
+        cov_map_columns += ["reference_coverage_dup", "reference_coverage_dedup", "mapped_nucleotides_dup", "mapped_nucleotides_dedup"]
+
+    masked_bam = f"{out_prefix}_masked_sorted.bam"
+    if os.path.exists(masked_bam):
+        genome_cov_dedup_mask = compute_genome_coverage(masked_bam, min_mapq, min_base_quality, keep_dup=False)
+        mapped_nuc_dedup_mask = compute_mapped_nucleotides(masked_bam, min_mapq, min_base_quality, keep_dup=False)
+        cov_map_stats += [genome_cov_dedup_mask, mapped_nuc_dedup_mask]
+        cov_map_columns += ["reference_coverage_dedup_mask", "mapped_nucleotides_dedup_mask"]
+
+    cov_map_df = pd.DataFrame([cov_map_stats], columns=cov_map_columns)
+    stat_dfs.append(cov_map_df)
+
+    all_stats = pd.concat(stat_dfs, axis=1)
     all_stats = all_stats.T
 
     out_file = f"{out_prefix}_qc_stats.txt"

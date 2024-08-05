@@ -67,25 +67,12 @@ class ContactGenerator:
         
         if read_group == None:
             return
-            
-        r1 = []
-        r1_primary = None
-        
-        r2 = []
-        r2_primary = None
 
-        # Divide reads into R1 and R2
-        for read in read_group:
-            if read.query_name.split("_")[1] == "1":
-                if not read.is_secondary:
-                    r1_primary = read
-                    r1_primary_unique = read.mapping_quality >= self.min_mapq
-                r1.append(read)
-            elif read.query_name.split("_")[1] == "2":
-                if not read.is_secondary:
-                    r2_primary = read
-                    r2_primary_unique = read.mapping_quality >= self.min_mapq
-                r2.append(read)
+        r1, r1_primary, r2, r2_primary = self.divide_reads(read_group)
+        if r1_primary != None:
+            r1_primary_unique = r1_primary.mapping_quality >= self.min_mapq
+        if r2_primary != None:
+            r2_primary_unique = r2_primary.mapping_quality >= self.min_mapq
         
         # Order reads from 5' to 3'
         R1_trimmer = self.process_mate(r1, r1_primary, "1", read_group_name)
@@ -329,6 +316,7 @@ class ContactGenerator:
                  min_outward_dist=1000,
                  min_same_strand_dist=0,
                  read_type="bisulfite",
+                 manual_mate_annotation=False,
                  max_cut_site_split_algn_dist = 10,
                  max_cut_site_whole_algn_dist = 500
                 ):
@@ -346,6 +334,7 @@ class ContactGenerator:
         self.out_prefix = out_prefix
         self.bam = bam
         self.bisulfite = read_type == "bisulfite"
+        self.divide_reads = divide_reads_manual_annotation if manual_mate_annotation else divide_reads_default
         self.max_cut_site_split_algn_dist = max_cut_site_split_algn_dist
         self.max_cut_site_whole_algn_dist = max_cut_site_whole_algn_dist
 

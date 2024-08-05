@@ -2,31 +2,25 @@ from pathlib import Path
 from glob import glob
 import os
 import yaml
+import shutil
 
 class PrepareMapping:
 
-    def snm3Cseq(self):
+    def prepare_plates(self):
 
-        barcodes = self.config_dict["setup"]["barcodes"]
-        plate_info = self.config_dict["setup"]["plate_info"]
-        output_directory = self.config_dict["setup"]["output_directory"]
+        barcodes = self.config_dict["general"]["barcodes"]
+        plate_info = self.config_dict["general"]["plate_info"]
+        output_directory = self.config_dict["general"]["output_directory"]
 
-        Path(output_directory).mkdir(parents=True, exist_ok=True)
+        # Results directory
+        results_directory = os.path.join(output_directory, "results")
+        Path(results_directory).mkdir(parents=True, exist_ok=True)
 
-        if self.mode == "snm3Cseq":
-            smk_path = 'mapping_snm3Cseq.Snakefile'
-        elif self.mode == "scalemethyl":
-            smk_path = 'mapping_scalemethyl.Snakefile'
-            
-        smk_path = os.path.join(Path(__file__).parent.resolve(), "smk", smk_path)
+        # Snakemake directory
+        snakemake_path = os.path.join(Path(__file__).parent.resolve(), "snakemake")
+        snakemake_directory = os.path.join(output_directory, "snakemake_mapping")
+        shutil.copytree(snakemake_path, snakemake_directory, dirs_exist_ok=True)
 
-        # If custom snakefile is given, override above choice of smk_path
-        if self.snakefile:
-            smk_path = self.snakefile
-    
-        with open(smk_path) as f:
-            snake_template = f.read()
-                    
         cell_ids = []
         with open(barcodes) as f:
             for line in f:
@@ -44,7 +38,8 @@ class PrepareMapping:
                 line = line.split()
                 plate, fastq_directory = line[0], line[1]
                 
-                plate_run_directory = os.path.join(output_directory, plate)
+                plate_run_directory = os.path.join(results_directory, plate)
+                Path(plate_run_directory).mkdir(parents=True, exist_ok=True)
     
                 with open(f"{plate_run_directory}/mapping_scripts.txt", 'w') as scripts:
                     
@@ -52,46 +47,43 @@ class PrepareMapping:
                         cell_local_directory = f"{plate}_{cell}"
                         cell_run_directory = os.path.join(plate_run_directory, 
                                                           cell_local_directory)
+                        Path(cell_run_directory).mkdir(parents=True, exist_ok=True)
+
+                        r1_fastq = os.path.join(cell_run_directory, f"{cell_local_directory}_indexed_R1.fastq.gz")
+                        r2_fastq = os.path.join(cell_run_directory, f"{cell_local_directory}_indexed_R2.fastq.gz")
                         
+                        run_config = f"{cell_run_directory}/run_config.csv"
                         snakemake_cmd = f"{cell_run_directory}/mapping_cmd.txt"
                         scripts.write(snakemake_cmd + "\n")
                         
                         with open(snakemake_cmd, 'w') as f:
+                            
                             cmd = f"snakemake -d {cell_run_directory} "
-                            cmd += f"--snakefile {plate_run_directory}/mapping.smk -c {self.jobs} "
-                            cmd += f"--config 'cell=\"{cell}\"' 'plate=\"{plate}\"' {self.nolock} {self.rerun_incomplete} "
+                            cmd += f"--snakefile {snakemake_directory}/mapping.smk "
+                            cmd += f"--configfile {self.config} {self.snakemake_params}"
                             f.write(cmd + '\n')
-            
-                params_write = "\n".join([f"{k} = {v}" for k, v in self.params.items()])
-                params_write += "\n"
-            
-                with open(f"{plate_run_directory}/mapping.smk", 'w') as f:
-                    f.write(params_write + snake_template)
+
+                        with open(run_config, 'w') as f:
+                            
+                            f.write(",".join(["r1", "r2"]) + '\n')
+                            f.write(",".join([cell_local_directory, r1_fastq, r2_fastq]) + '\n')
+                    
     
-    def demultiplexed(self):
-
-        if self.mode == "contacts":
-            smk_path = 'mapping_contacts.Snakefile'
-        elif self.mode == "contacts_bisulfite":
-            smk_path = 'mapping_contacts_bisulfite.Snakefile'
-        else:
-            raise ValueError('Valid mode was not provided!')
-
-        smk_path = os.path.join(Path(__file__).parent.resolve(), "smk", smk_path)
-
-        # If custom snakefile is given, override above choice of smk_path
-        if self.snakefile:
-            smk_path = self.snakefile
+    def prepare_ids(self):
         
-        output_directory = self.config_dict["setup"]["output_directory"]
-        fastq_info = self.config_dict["setup"]["fastq_info"]
+        output_directory = self.config_dict["general"]["output_directory"]
+        fastq_info = self.config_dict["general"]["fastq_info"]
 
-        Path(output_directory).mkdir(parents=True, exist_ok=True)
+        # Results directory
+        results_directory = os.path.join(output_directory, "results")
+        Path(results_directory).mkdir(parents=True, exist_ok=True)
+
+        # Snakemake directory
+        snakemake_path = os.path.join(Path(__file__).parent.resolve(), "snakemake")
+        snakemake_directory = os.path.join(output_directory, "snakemake_mapping")
+        shutil.copytree(snakemake_path, snakemake_directory, dirs_exist_ok=True)
         
-        with open(smk_path) as f:
-            snake_template = f.read()
-            
-        with open(f"{output_directory}/mapping_scripts.txt", 'w') as scripts, \
+        with open(f"{results_directory}/mapping_scripts.txt", 'w') as scripts, \
             open(fastq_info) as f:
     
             for line in f:
@@ -101,63 +93,47 @@ class PrepareMapping:
                 if line[0] == "#":
                     continue
                 line = line.split()
-                exp, r1_fastq, r2_fastq = line[0], line[1], line[2]
+                id, r1_fastq, r2_fastq = line[0], line[1], line[2]
                 
-                exp_run_directory = os.path.join(output_directory, exp)
-                exp_run_directory_path = Path(exp_run_directory)
-                exp_run_directory_path.mkdir(parents=True, exist_ok=True)
-                        
-                snakemake_cmd = f"{exp_run_directory}/mapping_cmd.txt"
+                id_run_directory = os.path.join(results_directory, id)
+                id_run_directory_path = Path(id_run_directory)
+                id_run_directory_path.mkdir(parents=True, exist_ok=True)
+
+                run_config = f"{id_run_directory}/run_config.csv"
+                snakemake_cmd = f"{id_run_directory}/mapping_cmd.txt"
                 scripts.write(snakemake_cmd + "\n")
                         
                 with open(snakemake_cmd, 'w') as f:
-                    cmd = f"snakemake -d {exp_run_directory} "
-                    cmd += f"--snakefile {output_directory}/mapping.smk -c {self.jobs} "
-                    cmd += f"--config r1={r1_fastq} r2={r2_fastq} exp={exp} {self.nolock} {self.rerun_incomplete} "
+                    
+                    cmd = f"snakemake -d {id_run_directory} "
+                    cmd += f"--snakefile {snakemake_directory}/mapping.smk "
+                    cmd += f"--configfile {self.config} {self.snakemake_params}"
                     f.write(cmd + '\n')
 
-        params_write = "\n".join([f"{k} = {v}" for k, v in self.params.items()])
-        params_write += "\n"
-            
-        with open(f"{output_directory}/mapping.smk", 'w') as f:
-            f.write(params_write + snake_template)
+                
+                with open(run_config, 'w') as f:
+                    
+                    f.write(",".join(["r1", "r2"]) + '\n')
+                    f.write(",".join([id, r1_fastq, r2_fastq]) + '\n')
 
     def __init__(self,
                  config,
-                 jobs=2,
-                 nolock=False,
-                 snakefile=None,
-                 rerun_incomplete=False
+                 snakemake_params
                 ):
         
         with open(config) as f:
             self.config_dict = yaml.safe_load(f)
 
-        self.mode = self.config_dict["setup"]["mode"]
+        self.config = config
         
-        mapping_threads = jobs // 2 if jobs > 1 else 1
-
-        self.jobs = jobs
-        self.snakefile = snakefile
+        self.mode = self.config_dict["general"]["mode"]
         
-        self.params = {
-            "mapping_threads" : f'{mapping_threads}',
-            "parameters_path" : f'"{config}"',
-        }
-    
-        self.nolock = "--nolock" if nolock else ""
-        self.rerun_incomplete = "--rerun-incomplete" if rerun_incomplete else ""
+        self.snakemake_params = snakemake_params
 
-        if "snm3Cseq" == self.mode:
-            
-            self.snm3Cseq()
+        # Plate-level data (demultiplexed by this package)
+        if self.config_dict["general"]["plate_info"]:
+            self.prepare_plates()
 
-        elif "scalemethyl" == self.mode:
-
-            self.snm3Cseq()
-
-        else:
-
-            self.demultiplexed()
-
-                
+        # Id-level data  (already demultiplexed)
+        elif self.config_dict["general"]["fastq_info"]:
+            self.prepare_ids()

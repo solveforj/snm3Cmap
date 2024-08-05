@@ -62,15 +62,8 @@ def prepare_demultiplex_register_subparser(subparser):
 
     parser_opt = parser.add_argument_group("optional arguments")
     
-    parser_opt.add_argument('--jobs', type=int, default=2,
-                        help='If set, Snakemake is run with this many concurrent processes')
-    
-    parser_opt.add_argument('--nolock', action="store_true", 
-                            help='If set, Snakemake is run with --nolock (working directory will not be locked)')
-    
-    parser_opt.add_argument('--rerun-incomplete', action="store_true",
-                            help="""If set, Snakemake is run with --rerun-incomplete 
-                                    (re-run all jobs the output of which is recognized as incomplete)""")
+    parser_opt.add_argument('--snakemake-params', type=str, default="", 
+                            help="Snakemake-specific parameters")
 
 def prepare_mapping_register_subparser(subparser):
     parser = subparser.add_parser('prepare-mapping',
@@ -85,35 +78,34 @@ def prepare_mapping_register_subparser(subparser):
 
     parser_opt = parser.add_argument_group("optional arguments")
     
-    parser_opt.add_argument('--jobs', type=int, default=2,
-                        help='If set, Snakemake is run with this many concurrent processes')
-    
-    parser_opt.add_argument('--nolock', action="store_true", 
-                            help='If set, Snakemake is run with --nolock (working directory will not be locked)')
-
-    parser_opt.add_argument('--snakefile', type=str, default=None,
-                        help='Specify a custom Snakefile path')
-    
-    parser_opt.add_argument('--rerun-incomplete', action="store_true",
-                            help="""If set, Snakemake is run with --rerun-incomplete 
-                                    (re-run all jobs the output of which is recognized as incomplete)""")
+    parser_opt.add_argument('--snakemake-params', type=str, default="", 
+                            help="Snakemake-specific parameters")
 
 def contamination_filter_register_subparser(subparser):
     parser = subparser.add_parser('contamination-filter',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                                  help="Filter out reads with high CH methylation")
+                                  help="Select only reads that have low CH methylation and/or small numbers of CH sites")
 
     # Required arguments
     parser_req = parser.add_argument_group("required arguments")
     
     parser_req.add_argument('--bam', type=str, default=None, required=True,
                             help='Path to input bam')
-                            
-    parser_req.add_argument('--min-mapq', type=int, default=30, required=True,
-                            help="MAPQ threshold for considering a read's CH methylation")
-                            
+
     parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
                             help='Path including name prefix for output filtered bam')
+
+    parser_opt = parser.add_argument_group("optional arguments")
+
+    parser_opt.add_argument('--min-mapq', type=int, default=30, 
+                            help="MAPQ threshold for considering a read's CH methylation")
+
+    parser_opt.add_argument('--max-mc-ch', type=float, default=0.7,  
+                            help="Methylated fraction of CH sites threshold")
+
+    parser_opt.add_argument('--max-ch-sites', type=int, default=3,  
+                            help="CH sites threshold")
+                                
 
 def call_contacts_register_subparser(subparser):
     parser = subparser.add_parser('call-contacts',
@@ -172,6 +164,11 @@ def call_contacts_register_subparser(subparser):
 
     parser_opt.add_argument('--read-type', type=str, default="bisulfite", choices=['bisulfite', 'wgs'],
                             help='Indicates that reads were bisulfite converted or not bisulfite converted (wgs)')
+
+    parser_opt.add_argument('--manual-mate-annotation', action="store_true",
+                            help="""If set, input bam file is understood to have mates manually added as suffixes 
+                                    to read names (i.e. @readname_1 or @readname_2). This is done in the case of SE 
+                                    alignment to distinguish the mates.""")
 
     parser_opt.add_argument('--max-cut-site-split-algn-dist', type=int, default = 20,
                             help="""Max allowed distance (bp) from nearest cut site to split alignment to be considered ligation event""")
@@ -254,13 +251,15 @@ def pairtools_stats_register_subparser(subparser):
     parser_req.add_argument('--artefacts', type=str, default=None, required=True,
                             help='Path to non-ligation artefacts pairs file')
 
-    parser_req.add_argument('--contacts-stats', type=str, default=None, required=True,
+    parser_opt = parser.add_argument_group("optional arguments")
+
+    parser_opt.add_argument('--contacts-stats', type=str, default=None, required=False,
                             help='Path to pairtools dedup stats for contacts pairs file')
 
-    parser_req.add_argument('--artefacts-stats', type=str, default=None, required=True,
+    parser_opt.add_argument('--artefacts-stats', type=str, default=None, required=False,
                             help='Path to pairtools dedup stats for non-ligation-artefacts pairs file')
     
-    parser_req.add_argument('--filterbycov-stats', type=str, default=None, required=True,
+    parser_opt.add_argument('--filterbycov-stats', type=str, default=None, required=False,
                             help='Path to pairtools filterbycov stats for contacts pairs file')
                             
     
@@ -275,11 +274,14 @@ def aggregate_qc_stats_register_subparser(subparser):
     # Required arguments
     parser_req = parser.add_argument_group("required arguments")
     
-    parser_req.add_argument('--cell', type=str, default=None, required=True,
-                            help='Name of cell')
+    parser_req.add_argument('--job', type=str, default=None, required=True,
+                            help='Name of job (i.e. cell or experiment name)')
                             
     parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
                             help='Path including name prefix for output stats file')
+
+    parser_req.add_argument('--mode', type=str, default=None, choices=["snm3Cseq", "bsdna", "dna"], required=True,
+                        help='Mode')
 
     parser_opt = parser.add_argument_group("optional arguments")
 

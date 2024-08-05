@@ -1,26 +1,23 @@
 from pathlib import Path
 import os
 import yaml
+import shutil
 
 class PrepareDemultiplex:
 
-    def snm3Cseq(self):
+    def prepare_plates(self):
 
-        barcodes = self.config_dict["setup"]["barcodes"]
-        plate_info = self.config_dict["setup"]["plate_info"]
-        output_directory = self.config_dict["setup"]["output_directory"]
+        plate_info = self.config_dict["general"]["plate_info"]
+        output_directory = self.config_dict["general"]["output_directory"]
 
-        Path(output_directory).mkdir(parents=True, exist_ok=True)
-        
-        if self.mode == "snm3Cseq":
-            smk_path = 'demultiplex_snm3Cseq.Snakefile'
-        elif self.mode == "scalemethyl":
-            smk_path = 'demultiplex_scalemethyl.Snakefile'
-            
-        smk_path = os.path.join(Path(__file__).parent.resolve(), "smk", smk_path)
-    
-        with open(smk_path) as f:
-            snake_template = f.read()
+        # Results directory
+        results_directory = os.path.join(output_directory, "results")
+        Path(results_directory).mkdir(parents=True, exist_ok=True)
+
+        # Snakemake directory
+        snakemake_path = os.path.join(Path(__file__).parent.resolve(), "snakemake")
+        snakemake_directory = os.path.join(output_directory, "snakemake_demultiplex")
+        shutil.copytree(snakemake_path, snakemake_directory, dirs_exist_ok=True)
                     
         with open(plate_info) as f:
             for line in f:
@@ -31,53 +28,38 @@ class PrepareDemultiplex:
                     continue
                 line = line.split()
                 plate, fastq_directory = line[0], line[1]
-                plate_run_directory = os.path.join(output_directory, plate)
+                plate_run_directory = os.path.join(results_directory, plate)
                 Path(plate_run_directory).mkdir(parents=True, exist_ok=True)
-    
-                plate_config = {}
-                for mate in ["R1", "R2"]: 
-                    r_fn = f"{fastq_directory}*{plate}[-_]*{mate}*fastq.gz"
-                    plate_config[mate] = r_fn
-    
-                plate_config["out_dir"] = plate_run_directory
-                plate_config["barcodes"] = barcodes
-                plate_config["plate"] = plate
-    
-                yaml_directory = f"{plate_run_directory}/config.yaml"
+
+                run_config = f"{plate_run_directory}/run_config.csv"
                 
-                with open(yaml_directory, "w") as outfile:
-                    yaml.dump(plate_config, outfile)
-    
-                with open(f"{plate_run_directory}/demultiplex.smk", 'w') as outfile:
-                    outfile.write(snake_template)
-                    
+                with open(run_config, "w") as f:
+                    f.write(",".join(["fastq_dir"]) + "\n")
+                    f.write(",".join([plate, fastq_directory]) + "\n")
+
                 with open(f"{plate_run_directory}/demultiplex_cmd.txt", 'w') as outfile:
                     cmd = f"snakemake -d {plate_run_directory} "
-                    cmd += f"--snakefile {plate_run_directory}/demultiplex.smk "
-                    cmd += f" -c {self.jobs} "
-                    cmd += f" {self.nolock} {self.rerun_incomplete} "
+                    cmd += f"--snakefile {snakemake_directory}/demultiplex.smk "
+                    cmd += f"--configfile {self.config} {self.snakemake_params} "
                     outfile.write(cmd + '\n')
 
     def __init__(self,
                  config,
-                 jobs=2,
-                 nolock=False,
-                 rerun_incomplete=False
+                 snakemake_params
                 ):
         
         with open(config) as f:
             self.config_dict = yaml.safe_load(f)
 
-        self.mode = self.config_dict["setup"]["mode"]
+        self.config = config
         
-        self.jobs = jobs
+        self.mode = self.config_dict["general"]["mode"]
         
-        self.nolock = "--nolock" if nolock else ""
-        self.rerun_incomplete = "--rerun-incomplete" if rerun_incomplete else ""
+        self.snakemake_params = snakemake_params
 
-        if "snm3Cseq" == self.mode:
-            self.snm3Cseq()
-        elif "scalemethyl" == self.mode:
-            self.snm3Cseq()
+        # Plate-level data (demultiplexed by this package)
+        if self.config_dict["general"]["plate_info"] and self.config_dict["general"]["barcodes"]:
+            self.prepare_plates()
+
         else:
-            print("Mode not recognized!")
+            raise Exception("Demultiplexing requires plate info file")

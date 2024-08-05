@@ -64,9 +64,9 @@ class ContaminationFilter:
                 else:
                     """
                     Discard all reads with same query name (i.e. primary/secondary alignments)
-                    if (>= 3 CH sites) OR (>= 70% of CH sites are methylated)
+                    if (>= 3 CH sites) OR (> 70% of CH sites are methylated)
                     """
-                    if (um + m) < 3 or (m / (um + m)) < 0.7:
+                    if (um + m) < self.max_ch_sites or (m / (um + m)) <= self.max_mc_ch:
                         for r in read_group_reads:
                             bam_out.write(r)
                         if mate == "1":
@@ -86,7 +86,7 @@ class ContaminationFilter:
                     m += r_m
             if read_group == None:
                 return
-            if (um + m) < 3 or (m / (um + m)) < 0.7:
+            if (um + m) < self.max_ch_sites or (m / (um + m)) <= self.max_mc_ch:
                 for r in read_group_reads:
                     bam_out.write(r)
                 if mate == "1":
@@ -100,10 +100,17 @@ class ContaminationFilter:
                     self.r2_removed += 1          
 
     
-    def __init__(self, bam, min_mapq, out_prefix):
+    def __init__(self, 
+                 bam, 
+                 min_mapq, 
+                 max_mc_ch,
+                 max_ch_sites,
+                 out_prefix):
 
         self.bam = bam
         self.min_mapq = min_mapq
+        self.max_mc_ch = max_mc_ch
+        self.max_ch_sites = max_ch_sites
         self.out_prefix = out_prefix
 
         self.out = f"{out_prefix}_contam_filtered.bam"
