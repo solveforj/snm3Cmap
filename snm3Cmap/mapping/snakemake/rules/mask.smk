@@ -6,13 +6,17 @@ rule mask:
         temp("{id}_masked.bam"),
     params:
         out_prefix=lambda wildcards: f"{wildcards.id}",
-        extra=config["read_analysis"]["mask_params"]
+        manual_mate_annotation=('--manual-mate-annotation ' 
+                                if trim_output == "separate" and not joint_alignments 
+                                else ''),
+        extra=config["read_analysis"]["mask"]["mask_params"]
     threads:
         1
     shell:
         'snm3Cmap mask-overlaps '
         '--bam {input} '
         '--out-prefix {params.out_prefix} '
+        '{params.manual_mate_annotation} '
         '{params.extra} '
 
 rule coord_sort_masked:

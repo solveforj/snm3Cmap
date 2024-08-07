@@ -8,8 +8,8 @@ class PrepareMapping:
 
     def prepare_plates(self):
 
-        barcodes = self.config_dict["general"]["barcodes"]
-        plate_info = self.config_dict["general"]["plate_info"]
+        barcodes = self.config_dict["general"]["snm3Cseq_plate_input"]["barcodes"]
+        plate_info = self.config_dict["general"]["snm3Cseq_plate_input"]["plate_info"]
         output_directory = self.config_dict["general"]["output_directory"]
 
         # Results directory
@@ -72,7 +72,7 @@ class PrepareMapping:
     def prepare_ids(self):
         
         output_directory = self.config_dict["general"]["output_directory"]
-        fastq_info = self.config_dict["general"]["fastq_info"]
+        fastq_info = self.config_dict["general"]["general_input"]["fastq_info"]
 
         # Results directory
         results_directory = os.path.join(output_directory, "results")
@@ -130,10 +130,23 @@ class PrepareMapping:
         
         self.snakemake_params = snakemake_params
 
+        if ((self.config_dict["general"]["snm3Cseq_plate_input"]["plate_info"] or 
+            self.config_dict["general"]["snm3Cseq_plate_input"]["barcodes"]) and
+            self.config_dict["general"]["general_input"]["fastq_info"]):
+
+            raise Exception("Cannot have both snm3C-seq plate input and general input defined")
+            
+        if (not self.config_dict["general"]["general_input"]["fastq_info"] and not
+                (self.config_dict["general"]["snm3Cseq_plate_input"]["plate_info"] or
+                     self.config_dict["general"]["snm3Cseq_plate_input"]["barcodes"])):
+
+            raise Exception("Must have either snm3C-seq plate input or general input defined")
+
         # Plate-level data (demultiplexed by this package)
-        if self.config_dict["general"]["plate_info"]:
+        if (self.config_dict["general"]["snm3Cseq_plate_input"]["plate_info"] and 
+            self.config_dict["general"]["snm3Cseq_plate_input"]["barcodes"]):
             self.prepare_plates()
 
         # Id-level data  (already demultiplexed)
-        elif self.config_dict["general"]["fastq_info"]:
+        elif self.config_dict["general"]["general_input"]["fastq_info"]:
             self.prepare_ids()

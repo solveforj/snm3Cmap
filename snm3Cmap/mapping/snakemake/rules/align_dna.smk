@@ -5,12 +5,12 @@ if trim_output == "interleaved":
         input:
             rules.reformat.output
         output:
-            temp("{id}.bam")
+            temp("{id}_alignments.bam")
         threads: 
-            config["align"]["threads"]
+            config["align"]["align_params"]["bwa"]["threads"]
         params:
             reference_path=config["general"]["reference_path"],
-            extra=config["align"]["joint_params"]
+            extra=config["align"]["align_params"]["bwa"]["joint_params"]
         retries: 3
         shell:
             """
@@ -19,7 +19,7 @@ if trim_output == "interleaved":
 
     def get_bams(wildcards):
     
-        return f"{wildcards.id}.bam"
+        return f"{wildcards.id}_alignments.bam"
 
 elif trim_output == "separate" and not joint_alignments:
 
@@ -27,12 +27,12 @@ elif trim_output == "separate" and not joint_alignments:
         input:
             rules.reformat_r1.output
         output:
-            temp("{id}_R1.bam")
+            temp("{id}_R1_alignments.bam")
         threads: 
-            config["align"]["threads"]
+            config["align"]["align_params"]["bwa"]["threads"]
         params:
             reference_path=config["general"]["reference_path"],
-            extra=config["align"]["separate_R1_params"]
+            extra=config["align"]["align_params"]["bwa"]["separate_R1_params"]
         retries: 3
         shell:
             """
@@ -43,12 +43,12 @@ elif trim_output == "separate" and not joint_alignments:
         input:
             rules.reformat_r2.output
         output:
-            temp("{id}_R2.bam")
+            temp("{id}_R2_alignments.bam")
         threads: 
-            config[modes]["align"]["threads"]
+            config["align"]["align_params"]["bwa"]["threads"]
         params:
             reference_path=config["general"]["reference_path"],
-            extra=config["align"]["separate_R2_params"]
+            extra=config["align"]["align_params"]["bwa"]["separate_R2_params"]
         retries: 3
         shell:
             """
@@ -57,7 +57,7 @@ elif trim_output == "separate" and not joint_alignments:
 
     def get_bams(wildcards):
     
-        return expand("{id}_R{mate}.bam", id=wildcards.id, mate=[1, 2])
+        return expand("{id}_R{mate}_alignments.bam", id=wildcards.id, mate=[1, 2])
 
 elif trim_output == "separate" and joint_alignments:
 
@@ -66,12 +66,12 @@ elif trim_output == "separate" and joint_alignments:
             get_trimmed_r1_fastq, 
             get_trimmed_r2_fastq
         output:
-            temp("{id}.bam")
+            temp("{id}_alignments.bam")
         threads: 
-            config["align"]["threads"]
+            config["align"]["align_params"]["bwa"]["threads"]
         params:
             reference_path=config["general"]["reference_path"],
-            extra=config["align"]["joint_params"]
+            extra=config["align"]["align_params"]["bwa"]["joint_params"]
         retries: 3
         shell:
             """
@@ -80,4 +80,4 @@ elif trim_output == "separate" and joint_alignments:
 
     def get_bams(wildcards):
     
-        return f"{wildcards.id}.bam"
+        return f"{wildcards.id}_alignments.bam"

@@ -7,7 +7,7 @@ rule interleave:
     threads:
         1
     params:
-        seqtk=config["preprocess"]["seqtk"]
+        seqtk=config["trim_methods"]["meta"]["seqtk"]
     shell:
         """
         {params.seqtk} mergepe {input.r1} {input.r2} | gzip > {output}
@@ -21,8 +21,8 @@ rule trim:
     threads: 
         2
     params:
-        pre_meta=config["preprocess"]["pre-meta"],
-        extra=config["preprocess"]["pre-meta_params"]
+        pre_meta=config["trim_methods"]["meta"]["pre-meta"],
+        extra=config["trim_methods"]["meta"]["pre-meta_params"]
     shell:
         """
         zcat {input} | {params.pre_meta} -t {threads} {params.extra} - | gzip > {output}
@@ -34,7 +34,7 @@ rule trim_stats:
     output:
         stats = temp("{id}_trim_stats.txt")
     params:
-        seqtk=config["preprocess"]["seqtk"]
+        seqtk=config["trim_methods"]["meta"]["seqtk"]
     threads:
         1
     run:

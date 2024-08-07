@@ -16,7 +16,7 @@ rule pairtools_filterbycov:
             else temp("{id}_artefacts.dedup.highcov.pairs.gz")
         )
     params:
-        extra=config["contacts"]["lowcov_params"]
+        extra=config["contacts"]["lowcov"]["filterbycov_params"]
     threads:
         1
     shell:

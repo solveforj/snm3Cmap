@@ -25,7 +25,7 @@ rule sort:
 
 contamination_protocol = config["contamination"]["contamination_protocol"]
 
-if contamination_protocol == "default":
+if contamination_protocol == "default" and mode == "bsdna":
 
     rule contam_filter:
         input:

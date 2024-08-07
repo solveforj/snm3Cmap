@@ -6,12 +6,27 @@ rule mark_duplicates:
         bam = temp("{id}_mkdup.bam"),
         stats = temp("{id}_dupsifter_stats.tmp.txt")
     params:
-        reference_path=config["general"]["reference_path"]
+        reference_path=config["general"]["reference_path"],
+        extra=config["read_duplicates"]["dupsifter_params"]
     threads:
         2
     shell:
         """
-        dupsifter -s -o {output.bam} -O {output.stats} {params.reference_path} {input} 
+        dupsifter -s -o {output.bam} -O {output.stats} {params.extra} {params.reference_path}  {input} 
+        """
+
+rule coord_sort_mkdup:
+    input:
+        rules.mark_duplicates.output.bam
+    output:
+        temp("{id}_mkdup_sorted.bam")
+    params:
+        out_prefix=lambda wildcards: f"{wildcards.id}"
+    threads: 
+        10
+    shell:
+        """
+        samtools sort -@ {threads} -o {output} {input}
         """
 
 rule duplicates_stats:

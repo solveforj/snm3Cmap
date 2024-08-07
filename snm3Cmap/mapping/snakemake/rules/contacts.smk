@@ -1,6 +1,6 @@
 
 
-if config["contacts"]["call_protocol"] == "none":
+if config["contacts"]["call"]["call_protocol"] != "default":
     raise Exception("Contact calling protocol must be specified for desired output.")
 
 
@@ -15,10 +15,13 @@ rule generate_contacts:
     params:
         out_prefix=lambda wildcards: f"{wildcards.id}",
         chrom_sizes=config["general"]["chrom_sizes"],
-        restriction_sites=config["contacts"]["restriction_sites"],
-        extra=config["contacts"]["call_params"],
-        manual_mate_annotation="--manual-mate-annotation" if (trim_output == "separate" and 
-                                                              not joint_alignments) else ""
+        restriction_sites=config["contacts"]["call"]["restriction_sites"],
+        extra=config["contacts"]["call"]["call_params"],
+        manual_mate_annotation=('--manual-mate-annotation ' 
+                                if trim_output == "separate" and not joint_alignments 
+                                else ''),
+        read_type="wgs" if mode == "dna" else "bisulfite"
+        
     threads:
         1
     shell:
@@ -27,8 +30,10 @@ rule generate_contacts:
         '--out-prefix {params.out_prefix} '
         '--chrom-sizes {params.chrom_sizes} '
         '--restriction-sites {params.restriction_sites} '
-        '{params.extra} '
+        '--read-type {params.read_type} '
         '{params.manual_mate_annotation} '
+        '{params.extra} '
+        
 
 rule compress_contacts:
     input:
@@ -67,7 +72,7 @@ def get_filterbycov_stats(wildcards):
 def get_trimmed_bam(wildcards):
     return f"{wildcards.id}_trimmed.bam"
 
-if config["contacts"]["dedup_protocol"] == "default":
+if config["contacts"]["dedup"]["dedup_protocol"] == "default":
 
     include: "dedup_contacts.smk"
 
@@ -81,7 +86,7 @@ if config["contacts"]["dedup_protocol"] == "default":
                "artefacts_stats": f"{wildcards.id}_artefacts_dedup_stats.txt",
               }
 
-if config["contacts"]["lowcov_protocol"] == "default":
+if config["contacts"]["lowcov"]["lowcov_protocol"] == "default":
 
     include: "lowcov_contacts.smk"
     

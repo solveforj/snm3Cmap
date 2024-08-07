@@ -7,7 +7,7 @@ class PrepareDemultiplex:
 
     def prepare_plates(self):
 
-        plate_info = self.config_dict["general"]["plate_info"]
+        plate_info = self.config_dict["general"]["snm3Cseq_plate_input"]["plate_info"]
         output_directory = self.config_dict["general"]["output_directory"]
 
         # Results directory
@@ -57,9 +57,19 @@ class PrepareDemultiplex:
         
         self.snakemake_params = snakemake_params
 
-        # Plate-level data (demultiplexed by this package)
-        if self.config_dict["general"]["plate_info"] and self.config_dict["general"]["barcodes"]:
-            self.prepare_plates()
+        if ((self.config_dict["general"]["snm3Cseq_plate_input"]["plate_info"] or 
+            self.config_dict["general"]["snm3Cseq_plate_input"]["barcodes"]) and
+            self.config_dict["general"]["general_input"]["fastq_info"]):
 
-        else:
-            raise Exception("Demultiplexing requires plate info file")
+            raise Exception("Cannot have both snm3C-seq plate input and general input defined")
+            
+        if not (self.config_dict["general"]["snm3Cseq_plate_input"]["plate_info"] and 
+            self.config_dict["general"]["snm3Cseq_plate_input"]["barcodes"]):
+
+            raise Exception("Must have snm3C-seq plate info and barcodes defined")
+            
+        # Plate-level data (demultiplexed by this package)
+        if (self.config_dict["general"]["snm3Cseq_plate_input"]["plate_info"] and 
+            self.config_dict["general"]["snm3Cseq_plate_input"]["barcodes"]):
+            
+            self.prepare_plates()

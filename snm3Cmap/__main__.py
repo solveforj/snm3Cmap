@@ -195,6 +195,11 @@ def mask_overlaps_register_subparser(subparser):
     parser_opt.add_argument('--min-mapq', type=int, default=30,
                             help='Minimum MAPQ to consider alignment')
 
+    parser_opt.add_argument('--manual-mate-annotation', action="store_true",
+                            help="""If set, input bam file is understood to have mates manually added as suffixes 
+                                    to read names (i.e. @readname_1 or @readname_2). This is done in the case of SE 
+                                    alignment to distinguish the mates.""")
+
 def bam_to_allc_register_subparser(subparser):
     parser = subparser.add_parser('bam-to-allc',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,

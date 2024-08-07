@@ -11,8 +11,4 @@ elif duplicate_protocol == "default":
 
         include: "mkdup_bisulfite.smk"
 
-    else:
-
-        raise Exception("Duplicate marking protocol not available for mode")
-    
 

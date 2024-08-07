@@ -39,7 +39,15 @@ def mask_qualities(read, start, end):
     
     read.query_qualities = pysam.qualitystring_to_array(original_qualities)
     return read
-        
+
+def get_mate_from_tag(read):
+    if read.is_read1:
+        return "1"
+    elif read.is_read2:
+        return "2"
+    else:
+        raise Exception(f"Mate not defined for read {read.query_name}")
+
 # Masked R1 and R2 as input
 def mask_overlaps(R1, R2):
     all_reads = []
@@ -116,9 +124,9 @@ class OverlapMask:
             # Handles low-MAPQ primary alignments for chimeric reads
             if read.mapping_quality < self.min_mapq:
                 continue
-            if read.query_name.split("_")[1] == "1":
+            if self.get_read_mate(read) == "1":
                 r1.append(read)
-            elif read.query_name.split("_")[1] == "2":
+            elif self.get_read_mate(read) == "2":
                 r2.append(read)
 
         # Order reads from 5' to 3'
@@ -142,7 +150,9 @@ class OverlapMask:
             with pysam.AlignmentFile(self.masked_bam, 'wb', template=bam_in) as bam_out:
                                 
                 for read in bam_in:
-                    read_id = read.query_name.split("_")[0]
+                    read_id = self.get_read_id(read)
+                    #print(self.get_read_mate(read))
+                    #print(get_mate_from_tag(read))
                     if iter_count == 0:
                         read_group_name = read_id
                         read_group = []
@@ -157,11 +167,18 @@ class OverlapMask:
                         read_group = [read]
                 self.process_read_group(read_group, read_group_name, bam_out)
         
-    def __init__(self, bam, out_prefix, min_mapq=30):
+    def __init__(self, bam, out_prefix, min_mapq=30, manual_mate_annotation=False):
 
         self.min_mapq = min_mapq
         self.trimmed_bam = bam
         self.masked_bam = f'{out_prefix}_masked.bam'
+        
+        if manual_mate_annotation:
+            self.get_read_id = lambda x: x.query_name.split("_")[0] 
+            self.get_read_mate = lambda x: x.query_name.split("_")[1] 
+        else:
+            self.get_read_id = lambda x: x.query_name
+            self.get_read_mate = get_mate_from_tag
 
         self.process_bam()
         

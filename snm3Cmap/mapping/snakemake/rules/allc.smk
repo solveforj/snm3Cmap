@@ -9,7 +9,7 @@ rule bam_to_allc:
         methylation_stats = temp("{id}.allc.tsv.gz_methylation_stats.txt")
     params:
         reference_fasta=config["general"]["reference_path"],
-        extra=config["read_analysis"]["allc_params"]
+        extra=config["read_analysis"]["allc"]["allc_params"]
     threads:
         1
     shell:

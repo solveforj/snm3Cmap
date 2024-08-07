@@ -18,9 +18,13 @@ elif trim_protocol == "meta":
 
     include: "trim/trim_meta.smk"
 
+elif trim_protocol == "hires":
+
+    include: "trim/trim_hires.smk"
+
 elif trim_protocol == "none":
 
-    trim_output = "interleaved"
+    trim_output = "separate"
 
     def get_trimmed_r1_fastq(wildcards):
         return run_info.loc[wildcards.id]["r1"]

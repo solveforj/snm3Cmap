@@ -5,7 +5,7 @@ from glob import glob
 run_info = pd.read_csv("run_config.csv")
 # Get barcode names
 cell_ids = []
-barcodes = config["general"]["barcodes"]
+barcodes = config["general"]["snm3Cseq_plate_input"]["barcodes"]
 with open(barcodes) as f:
     for line in f:
         line = line.strip()

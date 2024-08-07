@@ -4,9 +4,9 @@ run_info = pd.read_csv("run_config.csv")
     
 mode = config["general"]["mode"]
 
-dedup_done = config["contacts"]["dedup_protocol"] != "none"
-lowcov_done = config["contacts"]["lowcov_protocol"] != "none"
-call_done = config["contacts"]["lowcov_protocol"] != "none"
+dedup_done = config["contacts"]["dedup"]["dedup_protocol"] != "none"
+lowcov_done = config["contacts"]["lowcov"]["lowcov_protocol"] != "none"
+call_done = config["contacts"]["call"]["call_protocol"] != "none"
 
 if call_done:
     last_contacts_step = "call"
@@ -31,13 +31,13 @@ if mode == "bsdna":
             expand("{id}_trimmed.bam", id=run_info.index),
             # Methylation
             (expand("{id}.allc.tsv.gz.tbi", id=run_info.index)
-             if config["read_analysis"]["allc_protocol"] != "none"
+             if config["read_analysis"]["allc"]["allc_protocol"] != "none"
              else []),
             (expand("{id}.allc.tsv.gz.count.csv", id=run_info.index)
-             if config["read_analysis"]["allc_protocol"] != "none"
+             if config["read_analysis"]["allc"]["allc_protocol"] != "none"
              else []),
             (expand("{id}.allc.tsv.gz", id=run_info.index)
-             if config["read_analysis"]["allc_protocol"] != "none"
+             if config["read_analysis"]["allc"]["allc_protocol"] != "none"
              else []),
             # Contacts
             expand(contacts, id=run_info.index),
