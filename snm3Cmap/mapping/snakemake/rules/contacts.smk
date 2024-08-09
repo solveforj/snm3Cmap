@@ -9,8 +9,16 @@ rule generate_contacts:
         get_merged_bam
     output:
         bam="{id}_trimmed.bam",
-        contacts=temp("{id}_contacts.pairs"),
-        artefacts=temp("{id}_artefacts.pairs"),
+        contacts=(
+            "{id}_contacts.pairs.gz"
+            if last_contacts_step == "call"
+            else temp("{id}_contacts.pairs.gz")
+        ),
+        artefacts=(
+            "{id}_artefacts.pairs.gz"
+            if last_contacts_step == "call"
+            else temp("{id}_artefacts.pairs.gz")
+        ),
         stats=temp("{id}_alignment_stats.txt")
     params:
         out_prefix=lambda wildcards: f"{wildcards.id}",
@@ -33,30 +41,6 @@ rule generate_contacts:
         '--read-type {params.read_type} '
         '{params.manual_mate_annotation} '
         '{params.extra} '
-        
-
-rule compress_contacts:
-    input:
-        contacts=rules.generate_contacts.output.contacts,
-        artefacts=rules.generate_contacts.output.artefacts
-    output:
-        contacts = (
-            "{id}_contacts.pairs.gz"
-            if last_contacts_step == "call"
-            else temp("{id}_contacts.pairs.gz")
-        ),
-        artefacts = (
-            "{id}_artefacts.pairs.gz"
-            if last_contacts_step == "call"
-            else temp("{id}_artefacts.pairs.gz")
-        )
-    threads:
-        1
-    shell:
-        """
-        bgzip -kf {input.contacts}
-        bgzip -kf {input.artefacts}
-        """   
 
 def get_pairs_data(wildcards):
    return {"contacts" : f"{wildcards.id}_contacts.pairs.gz",

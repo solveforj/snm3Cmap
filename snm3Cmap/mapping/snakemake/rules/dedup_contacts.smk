@@ -1,7 +1,7 @@
 
 rule dedup_contacts:
     input:
-        contacts = rules.compress_contacts.output.contacts
+        contacts = rules.generate_contacts.output.contacts
     output:
         contacts_dedup = (
             "{id}_contacts.dedup.pairs.gz"
@@ -32,7 +32,7 @@ rule dedup_contacts:
 
 rule dedup_artefacts:
     input:
-        artefacts = rules.compress_contacts.output.artefacts
+        artefacts = rules.generate_contacts.output.artefacts
     output:
         artefacts_dedup = (
             "{id}_artefacts.dedup.pairs.gz"

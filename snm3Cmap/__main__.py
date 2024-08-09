@@ -176,6 +176,24 @@ def call_contacts_register_subparser(subparser):
     parser_opt.add_argument('--max-cut-site-whole-algn-dist', type=int, default = 20,
                             help="""Max allowed distance (bp) from nearest cut site to whole alignment to be considered ligation event""")
 
+    parser_opt.add_argument('--pairs-reporting', type=str, default = "minimal", choices=["full", "minimal"],
+                            help="""If full, extra metadata will be reported as additional columns in pairs files""")
+
+    parser_opt.add_argument('--snps', type=str, default = None,
+                            help="""Path to phased SNPs file""")
+
+    parser_opt.add_argument('--chrom-regex', type=str, default = None,
+                            help="""Regex to select specific contacts and artefacts from specific chromosomes""")
+
+    parser_opt.add_argument('--blacklist', type=str, default = None,
+                            help="""Path to blacklist BED file. Contacts and artefacts that intersect with blacklisted regions will
+                                    not be reported""")
+
+    parser_opt.add_argument('--remove-all', action="store_true",
+                            help="""If set, then contacts and artefacts discovered exclusively by the pairtools all algorithm will
+                                    not be reported. This eliminates detection of multiple ligation events by this tool and is not
+                                    recommended to be set.""")
+
 def mask_overlaps_register_subparser(subparser):
     parser = subparser.add_parser('mask-overlaps',
                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -285,7 +303,7 @@ def aggregate_qc_stats_register_subparser(subparser):
     parser_req.add_argument('--out-prefix', type=str, default=None, required=True,
                             help='Path including name prefix for output stats file')
 
-    parser_req.add_argument('--mode', type=str, default=None, choices=["snm3Cseq", "bsdna", "dna"], required=True,
+    parser_req.add_argument('--mode', type=str, default=None, choices=["bsdna", "dna"], required=True,
                         help='Mode')
 
     parser_opt = parser.add_argument_group("optional arguments")

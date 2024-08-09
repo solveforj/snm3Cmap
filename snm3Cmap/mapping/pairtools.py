@@ -777,36 +777,6 @@ def rescue_walk(algns1, algns2, max_molecule_size):
     else:
         return None
 
-def write_pairs(
-    algn1,
-    algn2,
-    readID,
-    pair_index,
-    rule,
-    contact_class,
-    overlap,
-    cs_locs,
-    out_file
-):
-    
-    cols = [
-        readID,
-        algn1["chrom"],
-        str(algn1["pos"]),
-        algn2["chrom"],
-        str(algn2["pos"]),
-        algn1["strand"],
-        algn2["strand"],
-        algn1["type"] + algn2["type"],
-        rule,
-        pair_index[1],
-        contact_class,
-        str(overlap),
-        ",".join(cs_locs)
-    ]
-
-    out_file.write("\t".join(cols) + "\n")
-
 def contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap=None):
 
     R1_parsed = []
@@ -867,4 +837,3 @@ def contact_iter(R1, R2, min_mapq=30, max_molecule_size=750, max_inter_align_gap
                     report_position="outer",
                     report_orientation="pair")
     return output_iter, rule 
-    
